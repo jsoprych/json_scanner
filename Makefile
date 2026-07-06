@@ -1,0 +1,13 @@
+BIN := bin/scanner
+
+.PHONY: build run test vet tidy
+build:   ## static binary → bin/scanner
+	CGO_ENABLED=0 go build -o $(BIN) ./cmd/scanner
+run:     ## go run ./cmd/scanner
+	go run ./cmd/scanner
+test:    ## go test ./...
+	go test ./...
+vet:     ## go vet ./...
+	go vet ./...
+tidy:    ## go mod tidy
+	go mod tidy
