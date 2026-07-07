@@ -12,10 +12,14 @@ import (
 	"cetus-marketdata-scanner/internal/digest"
 	"cetus-marketdata-scanner/internal/sentinel"
 	"cetus-marketdata-scanner/internal/store"
+	"cetus-marketdata-scanner/internal/user"
 )
 
-// Model is everything the ops console renders.
+// Model is everything the two pages render: the user dashboard (/) shows breadth +
+// the acting user's signal studies; the admin console (/admin) adds ops state,
+// the data-quality watch, and the user registry.
 type Model struct {
+	Acting      user.User
 	Stats       store.OpsStats
 	DBSizeBytes int64
 	ScanMillis  int64
@@ -23,10 +27,14 @@ type Model struct {
 	Flags       []sentinel.Flag
 	Suspect     int
 	Watch       int
+	Users       []user.User
 }
 
-// HTML renders the console.
-func (m Model) HTML(w io.Writer) error { return tmpl.Execute(w, m) }
+// IndexHTML renders the user-facing dashboard (route "/").
+func (m Model) IndexHTML(w io.Writer) error { return tmpl.ExecuteTemplate(w, "index", m) }
+
+// AdminHTML renders the admin ops console (route "/admin").
+func (m Model) AdminHTML(w io.Writer) error { return tmpl.ExecuteTemplate(w, "admin", m) }
 
 // --- template helpers ---
 
@@ -125,4 +133,4 @@ var funcs = template.FuncMap{
 	},
 }
 
-var tmpl = template.Must(template.New("dash").Funcs(funcs).Parse(dashSrc))
+var tmpl = template.Must(template.New("dash").Funcs(funcs).Parse(stylesSrc + indexSrc + adminSrc))

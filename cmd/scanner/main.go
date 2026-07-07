@@ -11,10 +11,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"net"
@@ -403,10 +403,10 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 
 	ttl := time.Duration(cfg.ServeTTLSecs) * time.Second
 	var mu sync.Mutex
-	var cached []byte
+	var cached *dashboard.Model
 	var cachedAt time.Time
 
-	render := func() ([]byte, error) {
+	buildModel := func() (*dashboard.Model, error) {
 		start := time.Now()
 		universe, err := resolveUniverse(ctx, st, cfg)
 		if err != nil {
@@ -421,7 +421,6 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		}
 		flags := sentinel.Tier0(res.Rows, sentinel.DefaultTier0())
 		suspect, watch := sentinel.Counts(flags)
-
 		stats, err := st.Stats(ctx)
 		if err != nil {
 			return nil, err
@@ -430,45 +429,62 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		if fi, e := os.Stat(cfg.DBPath); e == nil {
 			size = fi.Size()
 		}
-
-		m := dashboard.Model{
-			Stats: stats, DBSizeBytes: size, ScanMillis: time.Since(start).Milliseconds(),
-			Digest: d, Flags: flags, Suspect: suspect, Watch: watch,
-		}
-		var buf bytes.Buffer
-		if err := m.HTML(&buf); err != nil {
-			return nil, err
+		var users []user.User
+		if reg, e := user.LoadFile(cfg.UsersPath); e == nil {
+			users = reg.All()
 		}
 		log.Info("dashboard rendered", "scanned", res.Scanned, "flagged", len(flags),
 			"day", res.Day.Format("2006-01-02"))
-		return buf.Bytes(), nil
+		return &dashboard.Model{
+			Acting: actingUser(log, cfg), Stats: stats, DBSizeBytes: size,
+			ScanMillis: time.Since(start).Milliseconds(), Digest: d,
+			Flags: flags, Suspect: suspect, Watch: watch, Users: users,
+		}, nil
+	}
+
+	// getModel returns a cached model, rebuilding when stale or ?refresh=1.
+	getModel := func(force bool) (*dashboard.Model, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if cached == nil || time.Since(cachedAt) >= ttl || force {
+			m, err := buildModel()
+			if err != nil {
+				return nil, err
+			}
+			cached, cachedAt = m, time.Now()
+		}
+		return cached, nil
+	}
+
+	writePage := func(w http.ResponseWriter, r *http.Request, adminOnly bool, render func(*dashboard.Model, io.Writer) error) {
+		m, err := getModel(r.URL.Query().Get("refresh") != "")
+		if err != nil {
+			log.Error("render dashboard failed", "error", err)
+			http.Error(w, "scan failed", http.StatusInternalServerError)
+			return
+		}
+		if adminOnly && !m.Acting.IsAdmin() {
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprintf(w, "403 — admin only (acting user %q is role %s)\n", m.Acting.ID, m.Acting.Role)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := render(m, w); err != nil {
+			log.Error("render page failed", "error", err)
+		}
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte("ok"))
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
+	mux.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
+		writePage(w, r, true, func(m *dashboard.Model, out io.Writer) error { return m.AdminHTML(out) })
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
 		}
-		mu.Lock()
-		fresh := cached != nil && time.Since(cachedAt) < ttl && r.URL.Query().Get("refresh") == ""
-		if !fresh {
-			b, err := render()
-			if err != nil {
-				mu.Unlock()
-				log.Error("render dashboard failed", "error", err)
-				http.Error(w, "scan failed", http.StatusInternalServerError)
-				return
-			}
-			cached, cachedAt = b, time.Now()
-		}
-		body := cached
-		mu.Unlock()
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(body)
+		writePage(w, r, false, func(m *dashboard.Model, out io.Writer) error { return m.IndexHTML(out) })
 	})
 
 	// Bind first, so a port collision fails immediately with a clear error instead of

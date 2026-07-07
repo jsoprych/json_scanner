@@ -1,15 +1,7 @@
 package dashboard
 
-// dashSrc is the admin ops console: warehouse/ingestion state + market breadth +
-// signal sections + the Sentinel data-quality watch. Self-contained, responsive,
-// light/dark. Served live by `scanner serve`.
-const dashSrc = `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cetus Scanner · Ops Console — {{.Digest.DateLabel}}</title>
-<style>
+// stylesSrc is the shared style block, included by both pages via {{template "styles"}}.
+const stylesSrc = `{{define "styles"}}<style>
   :root{
     --ground:#eef1f5; --panel:#fff; --panel2:#f6f8fb; --border:#d9dee6;
     --ink:#16202b; --muted:#5a6b7b; --faint:#8a99a8; --accent:#0891b2;
@@ -46,11 +38,12 @@ const dashSrc = `<!doctype html>
   .led{width:8px;height:8px;border-radius:50%;background:var(--up);animation:pulse 2.4s infinite}
   @keyframes pulse{0%{box-shadow:0 0 0 0 var(--up-bg)}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
   @media (prefers-reduced-motion:reduce){.led{animation:none}}
+  .badge{font-size:10px;font-weight:700;letter-spacing:.08em;padding:2px 7px;border-radius:5px;background:var(--down-bg);color:var(--down)}
   .sub{color:var(--faint);letter-spacing:.14em;text-transform:uppercase;font-size:10px;font-weight:600}
   .meta{margin-left:auto;display:flex;gap:20px;flex-wrap:wrap}
   .meta .v{font-family:var(--mono);font-size:13px}
-  .tgl{border:1px solid var(--border);background:var(--panel2);color:var(--muted);border-radius:8px;padding:6px 11px;font-size:12px;cursor:pointer}
-  .tgl:hover{color:var(--ink);border-color:var(--accent)} .tgl:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .btn{border:1px solid var(--border);background:var(--panel2);color:var(--muted);border-radius:8px;padding:6px 11px;font-size:12px;cursor:pointer;text-decoration:none;display:inline-block}
+  .btn:hover{color:var(--ink);border-color:var(--accent)} .btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
   .tile{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px 15px;box-shadow:var(--shadow)}
   .tile .big{font-family:var(--mono);font-size:27px;font-weight:600;line-height:1.1;margin:7px 0 2px}
@@ -72,60 +65,88 @@ const dashSrc = `<!doctype html>
   tbody tr{border-top:1px solid var(--border)} tbody tr:hover{background:var(--panel2)}
   .sym{font-weight:700} .none{color:var(--faint);font-style:italic;font-size:13px;padding:8px}
   .full{grid-column:1 / -1}
-  .breadth-row{display:flex;flex-wrap:wrap;gap:8px 20px;margin:10px 0 4px} .stat b{font-size:16px;font-family:var(--mono)}
   .flag{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;padding:10px 6px;border-top:1px solid var(--border)}
   .flag:first-child{border-top:0}
   .sev{font-size:10px;font-weight:700;letter-spacing:.05em;padding:3px 8px;border-radius:6px}
   .sev.SUSPECT{background:var(--down-bg);color:var(--down)} .sev.WATCH{background:var(--warn-bg);color:var(--warn)}
   .flag .name{font-family:var(--mono);font-weight:700} .flag .why{color:var(--muted);font-size:12.5px}
   .flag .metric{font-family:var(--mono);text-align:right}
-  .note{color:var(--faint);font-size:11.5px;padding:10px 6px 2px;font-style:italic}
+  .note{color:var(--faint);font-size:11.5px;padding:10px 6px 2px;font-style:italic;text-align:center}
   @media (max-width:820px){.kpis{grid-template-columns:1fr 1fr}.grid{grid-template-columns:1fr}.strip{grid-template-columns:1fr 1fr}.meta{width:100%;margin-left:0}}
-</style>
-</head>
-<body>
-<div class="shell">
+</style>{{end}}`
 
+const themeScript = `<script>document.getElementById('tgl').addEventListener('click',function(){var r=document.documentElement,d=matchMedia('(prefers-color-scheme:dark)').matches,c=r.getAttribute('data-theme')||(d?'dark':'light');r.setAttribute('data-theme',c==='dark'?'light':'dark');});</script>`
+
+// indexSrc is the user-facing dashboard: breadth + the acting user's signal studies.
+const indexSrc = `{{define "index"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cetus Scanner — Dashboard</title>{{template "styles"}}</head>
+<body><div class="shell">
   <div class="top">
-    <div class="brand"><span>📡</span> Cetus&nbsp;Scanner <span class="led" title="live"></span>
-      <span class="sub">Ops Console</span></div>
+    <div class="brand"><span>📡</span> Cetus&nbsp;Scanner <span class="led" title="live"></span></div>
     <div class="meta">
+      <div><span class="lbl">Viewing as</span><br><span class="v">{{.Acting.Name}} · {{.Acting.Tier}}</span></div>
       <div><span class="lbl">Trading day</span><br><span class="v">{{.Digest.DateLabel}}</span></div>
-      <div><span class="lbl">Eligible</span><br><span class="v">{{.Digest.SymbolsScanned}}</span></div>
-      <div><span class="lbl">Scan time</span><br><span class="v">{{ms .ScanMillis}}</span></div>
     </div>
-    <button class="tgl" id="tgl" aria-label="Toggle theme">◐ Theme</button>
+    {{if .Acting.IsAdmin}}<a class="btn" href="/admin">Admin →</a>{{end}}
+    <button class="btn" id="tgl" aria-label="Toggle theme">◐ Theme</button>
   </div>
 
   <div class="kpis">
-    <div class="tile">
-      <span class="lbl">Universe · has data</span>
+    <div class="tile"><span class="lbl">Above 200-DMA</span>
+      <div class="big">{{num1 .Digest.Breadth.PctAbove200}}<span style="font-size:16px">%</span></div>
+      {{$d := .Digest.Breadth.DeltaAbove200}}<div class="foot"><span class="delta {{if gt0 $d}}up{{else if lt0 $d}}down{{end}}">{{num1 $d}} pp</span> vs prior</div></div>
+    <div class="tile"><span class="lbl">Above 50-DMA</span>
+      <div class="big">{{num1 .Digest.Breadth.PctAbove50}}<span style="font-size:16px">%</span></div>
+      {{$e := .Digest.Breadth.DeltaAbove50}}<div class="foot"><span class="delta {{if gt0 $e}}up{{else if lt0 $e}}down{{end}}">{{num1 $e}} pp</span> vs prior</div></div>
+    <div class="tile"><span class="lbl">New 52-wk highs</span><div class="big up">{{.Digest.Breadth.New52wHigh}}</div><div class="foot">new lows <b class="down">{{.Digest.Breadth.New52wLow}}</b></div></div>
+    <div class="tile"><span class="lbl">Universe scanned</span><div class="big">{{.Digest.SymbolsScanned}}</div><div class="foot">studies for {{.Acting.Tier}} tier</div></div>
+  </div>
+
+  <div class="grid">
+    {{range .Digest.Sections}}
+    <div class="panel">
+      <div class="ph"><span>{{.Emoji}}</span><h2>{{.Title}}</h2><span class="cnt">{{len .Rows}}</span></div>
+      <div class="pb">{{if .Rows}}<table>
+        <thead><tr><th>Sym</th><th>Close</th><th>RSI</th><th>3-mo</th><th>$ Vol</th></tr></thead>
+        <tbody>{{range .Rows}}<tr><td class="sym">{{.Symbol}}</td><td>{{num2 .Close}}</td><td>{{num1 .RSI14}}</td><td class="{{if gt0 .Ret3m}}up{{else if lt0 .Ret3m}}down{{end}}">{{retpct .Ret3m}}</td><td>{{money .DollarVol}}</td></tr>{{end}}</tbody>
+      </table>{{else}}<div class="none">— none —</div>{{end}}</div>
+    </div>
+    {{end}}
+  </div>
+  <p class="note">Live · <span class="mono">scanner serve</span> · generated {{.Digest.GeneratedAt.Format "2006-01-02 15:04 UTC"}}</p>
+</div>` + themeScript + `</body></html>{{end}}`
+
+// adminSrc is the operator console: ingestion coverage, warehouse, data-quality
+// watch, and the user registry.
+const adminSrc = `{{define "admin"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cetus Scanner — Admin</title>{{template "styles"}}</head>
+<body><div class="shell">
+  <div class="top">
+    <div class="brand"><span>📡</span> Cetus&nbsp;Scanner <span class="badge">ADMIN</span> <span class="led"></span></div>
+    <div class="meta">
+      <div><span class="lbl">Trading day</span><br><span class="v">{{.Digest.DateLabel}}</span></div>
+      <div><span class="lbl">Scan time</span><br><span class="v">{{ms .ScanMillis}}</span></div>
+    </div>
+    <a class="btn" href="/">← Dashboard</a>
+    <button class="btn" id="tgl" aria-label="Toggle theme">◐ Theme</button>
+  </div>
+
+  <div class="kpis">
+    <div class="tile"><span class="lbl">Universe · has data</span>
       <div class="big">{{.Stats.Count "SUCCESS"}}</div>
       <div class="foot">of {{.Stats.Total}} tracked · <b class="mono">{{num1 (.Stats.Pct "SUCCESS")}}%</b> ingested</div>
       <div class="bar" title="SUCCESS / IN_FLIGHT / PENDING / EMPTY">
         <i style="width:{{num1 (.Stats.Pct "SUCCESS")}}%;background:var(--up)"></i>
         <i style="width:{{num1 (.Stats.Pct "IN_FLIGHT")}}%;background:var(--accent)"></i>
         <i style="width:{{num1 (.Stats.Pct "PENDING")}}%;background:var(--panel2)"></i>
-        <i style="width:{{num1 (.Stats.Pct "EMPTY")}}%;background:var(--warn)"></i>
-      </div>
-    </div>
-    <div class="tile">
-      <span class="lbl">Data-quality flags</span>
-      <div class="big">{{len .Flags}}</div>
-      <div class="foot"><span class="down">{{.Suspect}} suspect</span> · <span class="warn">{{.Watch}} watch</span></div>
-    </div>
-    <div class="tile">
-      <span class="lbl">Breadth · above 200-DMA</span>
-      <div class="big">{{num1 .Digest.Breadth.PctAbove200}}<span style="font-size:16px">%</span></div>
-      {{$d := .Digest.Breadth.DeltaAbove200}}
-      <div class="foot"><span class="delta {{if gt0 $d}}up{{else if lt0 $d}}down{{end}}">{{num1 $d}} pp</span> vs prior</div>
-    </div>
-    <div class="tile">
-      <span class="lbl">Breadth · above 50-DMA</span>
-      <div class="big">{{num1 .Digest.Breadth.PctAbove50}}<span style="font-size:16px">%</span></div>
-      {{$e := .Digest.Breadth.DeltaAbove50}}
-      <div class="foot"><span class="delta {{if gt0 $e}}up{{else if lt0 $e}}down{{end}}">{{num1 $e}} pp</span> · {{.Digest.Breadth.New52wHigh}} hi / {{.Digest.Breadth.New52wLow}} lo</div>
-    </div>
+        <i style="width:{{num1 (.Stats.Pct "EMPTY")}}%;background:var(--warn)"></i></div></div>
+    <div class="tile"><span class="lbl">Data-quality flags</span><div class="big">{{len .Flags}}</div>
+      <div class="foot"><span class="down">{{.Suspect}} suspect</span> · <span class="warn">{{.Watch}} watch</span></div></div>
+    <div class="tile"><span class="lbl">Above 200-DMA</span><div class="big">{{num1 .Digest.Breadth.PctAbove200}}<span style="font-size:16px">%</span></div>
+      {{$d := .Digest.Breadth.DeltaAbove200}}<div class="foot"><span class="delta {{if gt0 $d}}up{{else if lt0 $d}}down{{end}}">{{num1 $d}} pp</span> vs prior</div></div>
+    <div class="tile"><span class="lbl">Users</span><div class="big">{{len .Users}}</div><div class="foot">registry</div></div>
   </div>
 
   <div class="strip">
@@ -136,45 +157,25 @@ const dashSrc = `<!doctype html>
   </div>
 
   <div class="grid">
-    {{range .Digest.Sections}}
-    <div class="panel">
-      <div class="ph"><span>{{.Emoji}}</span><h2>{{.Title}}</h2><span class="cnt">{{len .Rows}}</span></div>
-      <div class="pb">
-        {{if .Rows}}
-        <table>
-          <thead><tr><th>Sym</th><th>Close</th><th>RSI</th><th>3-mo</th><th>$ Vol</th></tr></thead>
-          <tbody>
-          {{range .Rows}}<tr><td class="sym">{{.Symbol}}</td><td>{{num2 .Close}}</td><td>{{num1 .RSI14}}</td><td class="{{if gt0 .Ret3m}}up{{else if lt0 .Ret3m}}down{{end}}">{{retpct .Ret3m}}</td><td>{{money .DollarVol}}</td></tr>{{end}}
-          </tbody>
-        </table>
-        {{else}}<div class="none">— none —</div>{{end}}
-      </div>
-    </div>
-    {{end}}
-
     <div class="panel full">
       <div class="ph"><span>🛡️</span><h2>Data-Quality Watch</h2><span class="cnt">Sentinel Tier-0 · {{len .Flags}} flagged</span></div>
       <div class="pb" style="padding:4px 12px 12px">
-        {{range .Flags}}
-        <div class="flag">
+        {{range .Flags}}<div class="flag">
           <span class="sev {{upper .Severity}}">{{upper .Severity}}</span>
           <div><span class="name">{{.Symbol}}</span> &nbsp;<span class="why">{{.Reason}}</span></div>
           <div class="metric">3mo <span class="up">{{retpct .Ret3m}}</span> · {{money .DollarVol}} · {{ratio .Ratio200}}</div>
-        </div>
-        {{else}}<div class="none">— no anomalies —</div>{{end}}
-        <div class="note">Tier-0 deterministic flags. Canonical fixes belong upstream in the pipeline (fix once); this panel only surfaces.</div>
+        </div>{{else}}<div class="none">— no anomalies —</div>{{end}}
+        <div class="note" style="text-align:left">Tier-0 deterministic flags. Canonical fixes belong upstream in the pipeline (fix once); this panel only surfaces.</div>
       </div>
     </div>
-  </div>
 
-  <p class="note" style="text-align:center">Live · <span class="mono">scanner serve</span> over the cetus warehouse · generated {{.Digest.GeneratedAt.Format "2006-01-02 15:04 UTC"}}</p>
-</div>
-<script>
-  document.getElementById('tgl').addEventListener('click',function(){
-    var r=document.documentElement,dark=matchMedia('(prefers-color-scheme:dark)').matches;
-    var cur=r.getAttribute('data-theme')||(dark?'dark':'light');
-    r.setAttribute('data-theme',cur==='dark'?'light':'dark');
-  });
-</script>
-</body>
-</html>`
+    <div class="panel full">
+      <div class="ph"><span>👥</span><h2>Users</h2><span class="cnt">{{len .Users}}</span></div>
+      <div class="pb"><table>
+        <thead><tr><th>ID</th><th>Name</th><th>Tier</th><th>Role</th></tr></thead>
+        <tbody>{{range .Users}}<tr><td class="sym">{{.ID}}</td><td>{{.Name}}</td><td>{{.Tier}}</td><td>{{.Role}}</td></tr>{{end}}</tbody>
+      </table></div>
+    </div>
+  </div>
+  <p class="note">Admin · <span class="mono">scanner serve</span> · generated {{.Digest.GeneratedAt.Format "2006-01-02 15:04 UTC"}}</p>
+</div>` + themeScript + `</body></html>{{end}}`

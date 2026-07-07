@@ -19,7 +19,7 @@ cetus-marketdata-pipeline  ──(SQLite: adjusted_bars)──►  cetus-marketd
 |---------|--------------|
 | `scanner` / `scanner scan` | Per-symbol **JSONL signal stream** (volume / price / gap breakouts) on stdout |
 | `scanner digest` | **Daily post-close digest** — whole-universe snapshot → market breadth + preset studies (52-wk highs, golden cross, oversold bounce, momentum leaders), rendered `html` / `text` / `json` |
-| `scanner serve` | The digest as a **live HTML dashboard** over HTTP (cached, `?refresh=1` to force) |
+| `scanner serve` | Live HTTP dashboard (cached, `?refresh=1` to force). **`/`** = user dashboard (breadth + the acting user's signal studies); **`/admin`** = operator console (ingestion coverage, warehouse, data-quality watch, users) — **admin-only, else 403** |
 | `scanner anomalies` | **Data-quality pass** (Sentinel Tier-0): flags extreme-move × thin-liquidity × price/200-DMA outliers as text/JSONL — the deterministic seam the future cross-source + LLM tiers extend |
 | `scanner studies` | Materializes the snapshot into the scanner's **own SQLite store** and runs a user's **tier-accessible SQL-`WHERE` studies** (`studies.jsonl`) — pre-DSL, SQL is the study language |
 | `scanner users` | List the seeded users (id · tier · role) from `users.jsonl` |
