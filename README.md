@@ -127,6 +127,14 @@ Env-only (stdlib, no flags framework yet).
 | `SCANNER_SERVE_ADDR` | `:8080` | Dashboard listen address |
 | `SCANNER_SERVE_TTL_SECS` | `600` | Dashboard render cache TTL |
 | `SCANNER_SESSION_HOURS` | `8` | Login session lifetime |
+| `SCANNER_AUTH_MODE` | `login` | `login` (built-in sessions) or `proxy` (trust a reverse-proxy identity header) |
+| `SCANNER_TRUSTED_USER_HEADER` | `X-Token-User` | In `proxy` mode, the header carrying the authenticated user id |
+
+**Reverse-proxy auth (caddy-security etc.):** set `SCANNER_AUTH_MODE=proxy` and bind
+loopback (`SCANNER_SERVE_ADDR=127.0.0.1:8080`). The proxy authenticates (OAuth/OIDC/
+MFA/TLS) and injects the user id header; the scanner reads it, looks up tier/role in
+its user store (unknown users default to free/user), and skips its own login. Only
+trust the header when the scanner is reachable *only* via the proxy.
 
 **Studies & the scanner's own store** (`studies`) — the store is **separate from
 the read-only cetus warehouse**:

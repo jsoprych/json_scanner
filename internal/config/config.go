@@ -52,6 +52,11 @@ type Config struct {
 	ServeTTLSecs int
 	// SessionHours is how long a login session stays valid.
 	SessionHours int
+	// AuthMode is "login" (built-in sessions) or "proxy" (trust an identity header
+	// injected by a reverse proxy such as caddy-security). TrustedUserHeader names
+	// that header in proxy mode.
+	AuthMode          string
+	TrustedUserHeader string
 
 	// AnomalyFormat is the `anomalies` output: text (default) | jsonl.
 	AnomalyFormat string
@@ -115,7 +120,9 @@ func Load() Config {
 
 		ServeAddr:    envOr("SCANNER_SERVE_ADDR", ":8080"),
 		ServeTTLSecs: envInt("SCANNER_SERVE_TTL_SECS", 600),
-		SessionHours: envInt("SCANNER_SESSION_HOURS", 8),
+		SessionHours:      envInt("SCANNER_SESSION_HOURS", 8),
+		AuthMode:          envOr("SCANNER_AUTH_MODE", "login"),
+		TrustedUserHeader: envOr("SCANNER_TRUSTED_USER_HEADER", "X-Token-User"),
 
 		AnomalyFormat: envOr("SCANNER_ANOMALY_FORMAT", "text"),
 

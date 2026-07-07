@@ -87,6 +87,27 @@ func (s *sessionStore) delete(tok string) {
 	s.mu.Unlock()
 }
 
+const (
+	authModeLogin = "login" // built-in login + sessions (standalone/dev)
+	authModeProxy = "proxy" // trust an identity header from a reverse proxy (caddy-security)
+)
+
+// isLoopback reports whether a listen address binds only the loopback interface.
+func isLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	switch host {
+	case "", "0.0.0.0", "::":
+		return false
+	case "localhost":
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func main() {
 	log := telemetry.New(os.Stderr) // logs → stderr, output → stdout
 	cfg := config.Load()
@@ -463,6 +484,15 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		log.Error("open users failed", "path", cfg.UsersPath, "error", err)
 		os.Exit(1)
 	}
+	if cfg.AuthMode != authModeLogin && cfg.AuthMode != authModeProxy {
+		log.Error("bad SCANNER_AUTH_MODE", "mode", cfg.AuthMode, "want", "login|proxy")
+		os.Exit(2)
+	}
+	if cfg.AuthMode == authModeProxy && !isLoopback(cfg.ServeAddr) {
+		log.Warn("proxy auth on a non-loopback bind: the identity header is spoofable unless only the reverse proxy can reach this port — bind 127.0.0.1",
+			"addr", cfg.ServeAddr, "header", cfg.TrustedUserHeader)
+	}
+
 	sessions := newSessionStore()
 	sessTTL := time.Duration(cfg.SessionHours) * time.Hour
 	ttl := time.Duration(cfg.ServeTTLSecs) * time.Second
@@ -531,7 +561,8 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 			return nil, err
 		}
 		return &dashboard.Model{
-			Acting: u, Stats: cStats, DBSizeBytes: cSize, ScanMillis: cMillis,
+			Acting: u, SessionAuth: cfg.AuthMode == authModeLogin,
+			Stats: cStats, DBSizeBytes: cSize, ScanMillis: cMillis,
 			Digest: d, Flags: cFlags, Suspect: cSus, Watch: cWat, Users: users.All(),
 		}, nil
 	}
@@ -548,10 +579,41 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		return users.Find(uid)
 	}
 
-	page := func(w http.ResponseWriter, r *http.Request, adminOnly bool, render func(*dashboard.Model, io.Writer) error) {
-		u, ok := sessionUser(r)
-		if !ok {
+	// identify resolves the acting user: from the session cookie (login mode) or from
+	// the reverse proxy's trusted identity header (proxy mode). A proxy-vouched user
+	// with no local profile gets default free/user entitlement.
+	identify := func(r *http.Request) (user.User, bool) {
+		if cfg.AuthMode == authModeProxy {
+			id := strings.TrimSpace(r.Header.Get(cfg.TrustedUserHeader))
+			if id == "" {
+				return user.User{}, false
+			}
+			if u, ok := users.Find(id); ok {
+				return u, true
+			}
+			return user.User{ID: id, Name: id, Tier: user.TierFree, Role: user.RoleUser}, true
+		}
+		return sessionUser(r)
+	}
+
+	// requireUser resolves the acting user or writes the right unauth response.
+	requireUser := func(w http.ResponseWriter, r *http.Request) (user.User, bool) {
+		u, ok := identify(r)
+		if ok {
+			return u, true
+		}
+		if cfg.AuthMode == authModeProxy {
+			w.WriteHeader(http.StatusUnauthorized)
+			fmt.Fprintf(w, "401 — no identity from proxy (missing %s header)\n", cfg.TrustedUserHeader)
+		} else {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
+		}
+		return user.User{}, false
+	}
+
+	page := func(w http.ResponseWriter, r *http.Request, adminOnly bool, render func(*dashboard.Model, io.Writer) error) {
+		u, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 		if adminOnly && !u.IsAdmin() {
@@ -575,6 +637,10 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
 
 	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		if cfg.AuthMode == authModeProxy { // the proxy owns auth
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
 		if r.Method == http.MethodPost {
 			r.ParseForm()
 			u, ok := users.Find(r.FormValue("user"))
@@ -594,6 +660,10 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	})
 
 	mux.HandleFunc("/logout", func(w http.ResponseWriter, r *http.Request) {
+		if cfg.AuthMode == authModeProxy { // sign-out is handled by the proxy
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
 		if c, err := r.Cookie(sessionCookie); err == nil {
 			sessions.delete(c.Value)
 		}
@@ -603,9 +673,8 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 
 	// Admin user CRUD (admin-gated).
 	mux.HandleFunc("/admin/users", func(w http.ResponseWriter, r *http.Request) {
-		u, ok := sessionUser(r)
+		u, ok := requireUser(w, r)
 		if !ok {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
 		if !u.IsAdmin() {

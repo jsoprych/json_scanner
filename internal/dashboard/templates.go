@@ -95,7 +95,7 @@ const indexSrc = `{{define "index"}}<!doctype html>
     </div>
     {{if .Acting.IsAdmin}}<a class="btn" href="/admin">Admin →</a>{{end}}
     <button class="btn" id="tgl" aria-label="Toggle theme">◐ Theme</button>
-    <a class="btn" href="/logout">Sign out</a>
+    {{if .SessionAuth}}<a class="btn" href="/logout">Sign out</a>{{end}}
   </div>
 
   <div class="kpis">
@@ -137,7 +137,7 @@ const adminSrc = `{{define "admin"}}<!doctype html>
     </div>
     <a class="btn" href="/">← Dashboard</a>
     <button class="btn" id="tgl" aria-label="Toggle theme">◐ Theme</button>
-    <a class="btn" href="/logout">Sign out</a>
+    {{if .SessionAuth}}<a class="btn" href="/logout">Sign out</a>{{end}}
   </div>
 
   <div class="kpis">

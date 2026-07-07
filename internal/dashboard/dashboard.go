@@ -20,6 +20,7 @@ import (
 // the data-quality watch, and the user registry.
 type Model struct {
 	Acting      user.User
+	SessionAuth bool // true in built-in login mode → show Sign-out; false behind a proxy
 	Stats       store.OpsStats
 	DBSizeBytes int64
 	ScanMillis  int64
