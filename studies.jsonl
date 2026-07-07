@@ -7,3 +7,4 @@
 {"key":"oversold_bounce","title":"Oversold Bounce","emoji":"🔄","tier":"free","where":"rsi14 > 30 AND prev_rsi14 <= 30","order_by":"dollar_vol DESC","limit":8}
 {"key":"momentum_leaders","title":"Momentum Leaders (3-mo)","emoji":"🚀","tier":"free","where":"ret_3m IS NOT NULL AND dollar_vol > 5e6","order_by":"ret_3m DESC","limit":10}
 {"key":"pro_pullback","title":"Uptrend Pullback","emoji":"🎯","tier":"pro","where":"close > sma200 AND rsi14 < 45 AND dollar_vol > 1e7","order_by":"rsi14 ASC","limit":15}
+{"key":"desk_a_watch","title":"Desk-A Watch","emoji":"👥","visibility":"group","group":"desk-a","where":"close > sma50 AND dollar_vol > 2e7","order_by":"ret_3m DESC","limit":10}

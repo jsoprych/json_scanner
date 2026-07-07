@@ -38,6 +38,16 @@ func TestRegistryLoad(t *testing.T) {
 	}
 }
 
+func TestInGroup(t *testing.T) {
+	u := User{Groups: []string{"desk-a", "research"}}
+	if !u.InGroup("desk-a") || !u.InGroup("research") {
+		t.Error("expected membership")
+	}
+	if u.InGroup("nope") || (User{}).InGroup("desk-a") {
+		t.Error("unexpected membership")
+	}
+}
+
 func TestMissingIDErrors(t *testing.T) {
 	if _, err := LoadJSONL(strings.NewReader(`{"name":"NoID"}`)); err == nil {
 		t.Error("expected error for missing id")

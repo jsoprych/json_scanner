@@ -179,10 +179,15 @@ const adminSrc = `{{define "admin"}}<!doctype html>
     <div class="panel full">
       <div class="ph"><span>👥</span><h2>Users</h2><span class="cnt">{{len .Users}}</span></div>
       <div class="pb"><table>
-        <thead><tr><th>ID</th><th>Name</th><th>Tier</th><th>Role</th><th>Manage</th></tr></thead>
+        <thead><tr><th>ID</th><th>Name</th><th>Tier</th><th>Role</th><th>Groups</th><th>Manage</th></tr></thead>
         <tbody>{{range .Users}}<tr>
           <td class="sym">{{.ID}}{{if .Disabled}} <span class="off">off</span>{{end}}</td>
           <td>{{.Name}}</td><td>{{.Tier}}</td><td>{{.Role}}</td>
+          <td><form method="post" action="/admin/users" style="display:inline;white-space:nowrap">
+            <input type="hidden" name="action" value="set-groups"><input type="hidden" name="id" value="{{.ID}}">
+            <input name="groups" value="{{join .Groups}}" placeholder="a, b" style="width:84px">
+            <button class="mini" type="submit">set</button>
+          </form></td>
           <td><form method="post" action="/admin/users" style="display:inline;white-space:nowrap">
             <input type="hidden" name="id" value="{{.ID}}">
             {{if .Disabled}}<button class="mini" name="action" value="enable">Enable</button>{{else}}<button class="mini" name="action" value="disable">Disable</button>{{end}}
@@ -197,6 +202,7 @@ const adminSrc = `{{define "admin"}}<!doctype html>
         <input name="id" placeholder="id" style="width:90px" required>
         <input name="name" placeholder="name" style="width:120px">
         <input name="password" type="password" placeholder="password" style="width:120px">
+        <input name="groups" placeholder="groups (csv)" style="width:110px">
         <select name="tier"><option value="free">free</option><option value="pro">pro</option></select>
         <select name="role"><option value="user">user</option><option value="admin">admin</option></select>
         <button class="btn" type="submit">Create user</button>

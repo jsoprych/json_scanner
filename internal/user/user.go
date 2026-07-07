@@ -48,13 +48,24 @@ type User struct {
 	Name       string `json:"name"`
 	Tier       Tier   `json:"tier"`
 	Role       Role   `json:"role"`
-	PassSHA256 string `json:"pass_sha256,omitempty"` // hex sha256 of the password
-	Disabled   bool   `json:"disabled,omitempty"`    // disabled users can't sign in
+	Groups     []string `json:"groups,omitempty"`      // group memberships (for group-visible studies)
+	PassSHA256 string   `json:"pass_sha256,omitempty"` // hex sha256 of the password
+	Disabled   bool     `json:"disabled,omitempty"`    // disabled users can't sign in
 }
 
 // IsAdmin reports the admin role — an admin sees every study regardless of owner or
 // tier.
 func (u User) IsAdmin() bool { return u.Role == RoleAdmin }
+
+// InGroup reports membership in a group.
+func (u User) InGroup(g string) bool {
+	for _, x := range u.Groups {
+		if x == g {
+			return true
+		}
+	}
+	return false
+}
 
 // SetPassword stores the sha256 of pw. (Dev-grade; production should use a salted
 // KDF like bcrypt/argon2 — a deliberate no-new-dependency choice for now.)
@@ -233,6 +244,11 @@ func (s *Store) SetRole(id string, r Role) error { return s.mutate(id, func(u *U
 
 // SetPassword resets a user's password.
 func (s *Store) SetPassword(id, pw string) error { return s.mutate(id, func(u *User) { u.SetPassword(pw) }) }
+
+// SetGroups replaces a user's group memberships.
+func (s *Store) SetGroups(id string, groups []string) error {
+	return s.mutate(id, func(u *User) { u.Groups = groups })
+}
 
 // Delete removes a user.
 func (s *Store) Delete(id string) error {

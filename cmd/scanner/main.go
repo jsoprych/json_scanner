@@ -93,6 +93,17 @@ const (
 	authModeProxy = "proxy" // trust an identity header from a reverse proxy (caddy-security)
 )
 
+// splitCSV parses a comma-separated list into trimmed, non-empty items.
+func splitCSV(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 // isLoopback reports whether a listen address binds only the loopback interface.
 func isLoopback(addr string) bool {
 	host, _, err := net.SplitHostPort(addr)
@@ -725,7 +736,7 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		var actErr error
 		switch r.FormValue("action") {
 		case "create":
-			nu := user.User{ID: id, Name: r.FormValue("name"), Tier: user.Tier(r.FormValue("tier")), Role: user.Role(r.FormValue("role"))}
+			nu := user.User{ID: id, Name: r.FormValue("name"), Tier: user.Tier(r.FormValue("tier")), Role: user.Role(r.FormValue("role")), Groups: splitCSV(r.FormValue("groups"))}
 			nu.SetPassword(r.FormValue("password"))
 			actErr = users.Create(nu)
 		case "disable":
@@ -740,6 +751,8 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 			actErr = users.SetRole(id, user.RoleAdmin)
 		case "set-user":
 			actErr = users.SetRole(id, user.RoleUser)
+		case "set-groups":
+			actErr = users.SetGroups(id, splitCSV(r.FormValue("groups")))
 		case "delete":
 			if id == u.ID {
 				actErr = fmt.Errorf("cannot delete yourself")

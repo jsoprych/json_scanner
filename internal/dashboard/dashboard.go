@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"strconv"
+	"strings"
 
 	"cetus-marketdata-scanner/internal/digest"
 	"cetus-marketdata-scanner/internal/sentinel"
@@ -130,6 +131,7 @@ var funcs = template.FuncMap{
 	"money": money, "retpct": retpct, "num1": num1, "num2": num2,
 	"ratio": ratio, "humanInt": humanInt, "dbSize": dbSize, "ms": ms,
 	"int64": func(n int) int64 { return int64(n) },
+	"join":  func(ss []string) string { return strings.Join(ss, ", ") },
 	"gt0":   func(v float64) bool { return v > 0.05 },
 	"lt0":   func(v float64) bool { return v < -0.05 },
 	"upper": func(s sentinel.Severity) string {

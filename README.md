@@ -24,9 +24,18 @@ cetus-marketdata-pipeline  ──(SQLite: adjusted_bars)──►  cetus-marketd
 | `scanner studies` | Materializes the snapshot into the scanner's **own SQLite store** and runs a user's **tier-accessible SQL-`WHERE` studies** (`studies.jsonl`) — pre-DSL, SQL is the study language |
 | `scanner users` | List the seeded users (id · tier · role) from `users.jsonl` |
 
-Studies are **owned by a user and tier-gated**: `SCANNER_USER` picks the acting
-user (`users.jsonl` → id/tier/role); free users see free studies, pro unlocks pro,
-**admin sees all**. The digest/dashboard render exactly the acting user's studies.
+Study access has **three independent axes** (ugo-inspired, but not raw rwx):
+
+- **visibility** `private` \| `group` \| `public` — who may see it (you always see
+  your own; `group` requires membership; unset ⇒ global studies are public);
+- **tier** `free` \| `pro` — the subscription entitlement gate (separate from
+  visibility — it's billing, not an ACL);
+- **role** — an **admin** sees everything.
+
+Users (`users.jsonl`) carry `groups: []`; `SCANNER_USER` picks the acting user. The
+digest/dashboard render exactly that user's accessible studies. Example: `alice`
+(pro, group `desk-a`) sees the pro and desk-a studies; `bob` (free) sees only the
+free public ones.
 
 Any mode scans the universe chosen by `SCANNER_UNIVERSE` (`all` · `exchange:NASDAQ`
 · `list:sp500` · `file:tickers.txt`).

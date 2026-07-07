@@ -47,3 +47,20 @@ func TestLoadDefaultsAndAccess(t *testing.T) {
 		t.Errorf("admin access = %d, want 3 (all)", len(admin))
 	}
 }
+
+func TestGroupVisibility(t *testing.T) {
+	studies := []Study{
+		{Owner: user.GlobalID, Visibility: VisPublic, Tier: user.TierFree, Key: "pub"},
+		{Owner: user.GlobalID, Visibility: VisGroup, Group: "desk-a", Tier: user.TierFree, Key: "grp"},
+	}
+	// not in the group → only the public study.
+	out := Accessible(studies, user.User{ID: "bob", Tier: user.TierFree})
+	if len(out) != 1 || out[0].Key != "pub" {
+		t.Errorf("non-member access = %+v", out)
+	}
+	// group member → both.
+	out = Accessible(studies, user.User{ID: "alice", Tier: user.TierFree, Groups: []string{"desk-a"}})
+	if len(out) != 2 {
+		t.Errorf("member access = %d, want 2", len(out))
+	}
+}

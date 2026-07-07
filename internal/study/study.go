@@ -15,16 +15,27 @@ import (
 	"cetus-marketdata-scanner/internal/user"
 )
 
+// Visibility is who may see a study (the ugo axis, read-only: no execute bit).
+type Visibility string
+
+const (
+	VisPrivate Visibility = "private" // owner only
+	VisGroup   Visibility = "group"   // owner + members of Group
+	VisPublic  Visibility = "public"  // everyone (subject to tier)
+)
+
 // Study is a saved screen.
 type Study struct {
-	Owner   string    `json:"owner"`
-	Tier    user.Tier `json:"tier,omitempty"` // min tier to access (default free)
-	Key     string    `json:"key"`
-	Title   string    `json:"title"`
-	Emoji   string    `json:"emoji,omitempty"`
-	Where   string    `json:"where"`              // SQL WHERE body over the snapshot table
-	OrderBy string    `json:"order_by,omitempty"` // SQL ORDER BY body (ranking)
-	Limit   int       `json:"limit,omitempty"`
+	Owner      string     `json:"owner"`
+	Visibility Visibility `json:"visibility,omitempty"` // default: public if global-owned, else private
+	Group      string     `json:"group,omitempty"`      // group id when Visibility == group
+	Tier       user.Tier  `json:"tier,omitempty"`       // min tier to access (default free)
+	Key        string     `json:"key"`
+	Title      string     `json:"title"`
+	Emoji      string     `json:"emoji,omitempty"`
+	Where      string     `json:"where"`              // SQL WHERE body over the snapshot table
+	OrderBy    string     `json:"order_by,omitempty"` // SQL ORDER BY body (ranking)
+	Limit      int        `json:"limit,omitempty"`
 }
 
 // LoadJSONL reads studies (one JSON object per line; blank lines and #-comments
@@ -50,6 +61,13 @@ func LoadJSONL(r io.Reader) ([]Study, error) {
 		if s.Tier == "" {
 			s.Tier = user.TierFree
 		}
+		if s.Visibility == "" { // legacy rows: global studies are public, user studies private
+			if s.Owner == user.GlobalID {
+				s.Visibility = VisPublic
+			} else {
+				s.Visibility = VisPrivate
+			}
+		}
 		out = append(out, s)
 	}
 	return out, sc.Err()
@@ -65,23 +83,40 @@ func LoadFile(path string) ([]Study, error) {
 	return LoadJSONL(f)
 }
 
-// Accessible returns the studies a user may run: owned by them or by Global, and at
-// a tier the user's subscription unlocks. This is the monetization gate — free
-// users see free studies; pro studies require pro.
+// Accessible returns the studies a user may run. Three independent axes:
+//   - visibility (private | group | public): who may see it
+//   - tier (free | pro): the subscription entitlement gate
+//   - role (admin): sees everything
+//
+// You always see your own studies (no tier gate on those). For others' studies you
+// must be able to see them (visibility) AND have the tier.
 func Accessible(studies []Study, u user.User) []Study {
 	var out []Study
 	for _, s := range studies {
-		if u.IsAdmin() { // admin sees every study, any owner, any tier
-			out = append(out, s)
+		switch {
+		case u.IsAdmin(): // admin sees everything
+		case s.Owner == u.ID: // own studies, unconditionally
+		case !visibleTo(s, u): // hidden by visibility/group
 			continue
-		}
-		if s.Owner != user.GlobalID && s.Owner != u.ID {
-			continue
-		}
-		if s.Tier.Rank() > u.Tier.Rank() {
+		case s.Tier.Rank() > u.Tier.Rank(): // tier gate (others' studies only)
 			continue
 		}
 		out = append(out, s)
 	}
 	return out
+}
+
+// visibleTo reports whether a study (not owned by u) is visible to u by its
+// visibility scope.
+func visibleTo(s Study, u user.User) bool {
+	switch s.Visibility {
+	case VisPublic:
+		return true
+	case VisGroup:
+		return u.InGroup(s.Group)
+	case VisPrivate:
+		return false
+	default: // unset: global-owned is public, everything else private
+		return s.Owner == user.GlobalID
+	}
 }
