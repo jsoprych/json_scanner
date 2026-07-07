@@ -21,6 +21,7 @@ cetus-marketdata-pipeline  ──(SQLite: adjusted_bars)──►  cetus-marketd
 | `scanner digest` | **Daily post-close digest** — whole-universe snapshot → market breadth + preset studies (52-wk highs, golden cross, oversold bounce, momentum leaders), rendered `html` / `text` / `json` |
 | `scanner serve` | The digest as a **live HTML dashboard** over HTTP (cached, `?refresh=1` to force) |
 | `scanner anomalies` | **Data-quality pass** (Sentinel Tier-0): flags extreme-move × thin-liquidity × price/200-DMA outliers as text/JSONL — the deterministic seam the future cross-source + LLM tiers extend |
+| `scanner studies` | Materializes the snapshot into the scanner's **own SQLite store** and runs a user's **tier-accessible SQL-`WHERE` studies** (`studies.jsonl`) — pre-DSL, SQL is the study language |
 
 Any mode scans the universe chosen by `SCANNER_UNIVERSE` (`all` · `exchange:NASDAQ`
 · `list:sp500` · `file:tickers.txt`).
@@ -121,6 +122,16 @@ Env-only (stdlib, no flags framework yet).
 | `SCANNER_SERVE_ADDR` | `:8080` | Dashboard listen address |
 | `SCANNER_SERVE_TTL_SECS` | `600` | Dashboard render cache TTL |
 
+**Studies & the scanner's own store** (`studies`) — the store is **separate from
+the read-only cetus warehouse**:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `SCANNER_STORE_DB` | `:memory:` | The scanner's own SQLite store (snapshot materialization). Memory-first; a path (e.g. `scanner.db`) persists it for `sqlite3` inspection |
+| `SCANNER_STUDIES_PATH` | `studies.jsonl` | JSONL of SQL-`WHERE` studies (owner + tier per line) |
+| `SCANNER_STUDIES_FORMAT` | `text` | `text` \| `jsonl` |
+| `SCANNER_USER` | `global` | Acting user id (owner); tier gates which studies run |
+
 ## Layout
 
 ```
@@ -132,7 +143,11 @@ internal/indicators/  pure indicator funcs (SMA, RSI, rolling high/low, return)
 internal/screen/      SnapshotRow build, preset studies, market breadth (pure)
 internal/scan/        concurrent whole-universe snapshot (worker pool, BarLoader iface)
 internal/sentinel/    data-quality Tier-0 flags (deterministic; AI tiers extend it)
+internal/snapshot/    scanner's OWN SQLite store; materialize snapshot + run SQL studies
+internal/study/       studies as data (SQL-WHERE, JSONL, owner + tier)
+internal/user/        User entity + tiers (global user for now; monetization gate)
 internal/digest/      Digest assembly + html/text/json renderers
+internal/dashboard/   admin ops-console renderer (serve)
 internal/config/      env-first configuration (SCANNER_*, CETUS_DB)
 internal/telemetry/   slog JSON logger (stderr)
 docs/                 PHASE1_MVP · INDICATORS · SCANNER_DESIGN · AGENTS

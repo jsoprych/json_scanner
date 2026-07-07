@@ -1,0 +1,9 @@
+# Global studies — one JSON per line. Each is a SQL WHERE (+ ORDER BY / LIMIT) over
+# the in-memory snapshot table. owner defaults to "global", tier to "free".
+# Columns: symbol timestamp close high low dollar_vol sma50 sma200 prev_sma50
+# prev_sma200 rsi14 prev_rsi14 ret_3m high_52w low_52w  (NULL = not yet warmed).
+{"key":"new_52w_high","title":"New 52-Week Highs","emoji":"📈","tier":"free","where":"high >= high_52w","order_by":"dollar_vol DESC","limit":8}
+{"key":"golden_cross","title":"Golden Cross Today","emoji":"⚡","tier":"free","where":"sma50 > sma200 AND prev_sma50 <= prev_sma200","order_by":"dollar_vol DESC","limit":8}
+{"key":"oversold_bounce","title":"Oversold Bounce","emoji":"🔄","tier":"free","where":"rsi14 > 30 AND prev_rsi14 <= 30","order_by":"dollar_vol DESC","limit":8}
+{"key":"momentum_leaders","title":"Momentum Leaders (3-mo)","emoji":"🚀","tier":"free","where":"ret_3m IS NOT NULL AND dollar_vol > 5e6","order_by":"ret_3m DESC","limit":10}
+{"key":"pro_pullback","title":"Uptrend Pullback","emoji":"🎯","tier":"pro","where":"close > sma200 AND rsi14 < 45 AND dollar_vol > 1e7","order_by":"rsi14 ASC","limit":15}

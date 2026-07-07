@@ -32,8 +32,11 @@ import (
 	"cetus-marketdata-scanner/internal/scanner"
 	"cetus-marketdata-scanner/internal/screen"
 	"cetus-marketdata-scanner/internal/sentinel"
+	"cetus-marketdata-scanner/internal/snapshot"
 	"cetus-marketdata-scanner/internal/store"
+	"cetus-marketdata-scanner/internal/study"
 	"cetus-marketdata-scanner/internal/telemetry"
+	"cetus-marketdata-scanner/internal/user"
 )
 
 func main() {
@@ -56,8 +59,10 @@ func main() {
 		runServe(ctx, log, cfg)
 	case "anomalies":
 		runAnomalies(ctx, log, cfg)
+	case "studies":
+		runStudies(ctx, log, cfg)
 	default:
-		log.Error("unknown subcommand", "arg", sub, "want", "scan|digest|serve|anomalies")
+		log.Error("unknown subcommand", "arg", sub, "want", "scan|digest|serve|anomalies|studies")
 		os.Exit(2)
 	}
 }
@@ -262,6 +267,80 @@ func runAnomalies(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	}
 	log.Info("anomalies complete", "flagged", len(flags), "suspect", suspect, "watch", watch,
 		"scanned", len(res.Rows), "day", res.Day.Format("2006-01-02"))
+}
+
+// runStudies materializes the snapshot into the scanner's OWN store (in-memory by
+// default) and runs the acting user's tier-accessible SQL-WHERE studies against it.
+func runStudies(ctx context.Context, log *slog.Logger, cfg config.Config) {
+	st, universe := openUniverse(ctx, log, cfg)
+	defer st.Close()
+
+	all, err := study.LoadFile(cfg.StudiesPath)
+	if err != nil {
+		log.Error("load studies failed", "path", cfg.StudiesPath, "error", err)
+		os.Exit(1)
+	}
+	// Acting user (global for now); tier gates which studies are accessible.
+	u := user.Global()
+	u.ID = cfg.User
+	studies := study.Accessible(all, u)
+
+	since := time.Now().UTC().AddDate(0, 0, -cfg.DigestLookbackDays).Unix()
+	res := scan.Universe(ctx, st, universe, scan.Options{
+		Since: since, MinDollarVol: 0, Workers: cfg.DigestWorkers, // studies decide liquidity
+	}, log)
+
+	// The scanner's OWN store — never the cetus warehouse.
+	snap, err := snapshot.Open(cfg.StoreDB)
+	if err != nil {
+		log.Error("open snapshot store failed", "store", cfg.StoreDB, "error", err)
+		os.Exit(1)
+	}
+	defer snap.Close()
+	if err := snap.Load(res.Rows, res.Day.Unix()); err != nil {
+		log.Error("materialize snapshot failed", "error", err)
+		os.Exit(1)
+	}
+
+	switch cfg.StudiesFormat {
+	case "jsonl":
+		enc := json.NewEncoder(os.Stdout)
+		for _, s := range studies {
+			matches, err := snap.Run(s)
+			if err != nil {
+				log.Error("run study failed", "study", s.Key, "error", err)
+				continue
+			}
+			for _, m := range matches {
+				_ = enc.Encode(struct {
+					Owner string `json:"owner"`
+					Study string `json:"study"`
+					snapshot.Match
+				}{s.Owner, s.Key, m})
+			}
+		}
+	case "text":
+		fmt.Printf("STUDIES — user %s (%s) — %s — snapshot %d symbols · store %s\n\n",
+			u.ID, u.Tier, res.Day.Format("2006-01-02"), len(res.Rows), cfg.StoreDB)
+		for _, s := range studies {
+			matches, err := snap.Run(s)
+			if err != nil {
+				log.Error("run study failed", "study", s.Key, "error", err)
+				continue
+			}
+			fmt.Printf("%s %s  [%s]  (%d)\n", s.Emoji, s.Title, s.Tier, len(matches))
+			for _, m := range matches {
+				fmt.Printf("   %-8s %9.2f  RSI %5.1f  3mo %+6.0f%%  $%.1fM\n",
+					m.Symbol, m.Close, m.RSI14, m.Ret3m*100, m.DollarVol/1e6)
+			}
+			fmt.Println()
+		}
+	default:
+		log.Error("unknown studies format", "format", cfg.StudiesFormat, "want", "text|jsonl")
+		os.Exit(2)
+	}
+	log.Info("studies complete", "user", u.ID, "tier", u.Tier, "studies", len(studies),
+		"snapshot_rows", len(res.Rows), "store", cfg.StoreDB, "day", res.Day.Format("2006-01-02"))
 }
 
 // runServe serves the digest as a live HTML dashboard, recomputing at most once per

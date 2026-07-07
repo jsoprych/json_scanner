@@ -53,6 +53,19 @@ type Config struct {
 
 	// AnomalyFormat is the `anomalies` output: text (default) | jsonl.
 	AnomalyFormat string
+
+	// --- the scanner's OWN store (separate from the read-only cetus warehouse) ---
+
+	// StoreDB is the scanner's own SQLite DB — it materializes the snapshot here and
+	// (soon) holds users/studies/alerts. Rebuildable; never the cetus warehouse.
+	// ":memory:" for an ephemeral snapshot.
+	StoreDB string
+	// StudiesPath is the JSONL of SQL-WHERE studies (owned by users, tier-gated).
+	StudiesPath string
+	// StudiesFormat is the `studies` output: text (default) | jsonl.
+	StudiesFormat string
+	// User is the acting user id (owner) — "global" until real accounts exist.
+	User string
 }
 
 // defaultCetusDB is the fallback warehouse path. It stays pointed at the pipeline's
@@ -100,6 +113,14 @@ func Load() Config {
 		ServeTTLSecs: envInt("SCANNER_SERVE_TTL_SECS", 600),
 
 		AnomalyFormat: envOr("SCANNER_ANOMALY_FORMAT", "text"),
+
+		// Own store defaults to in-memory (rebuilt each run) — on a 32 GB box the
+		// whole snapshot lives in RAM. Set a path (e.g. scanner.db) to persist it
+		// for ad-hoc sqlite3 inspection.
+		StoreDB:       envOr("SCANNER_STORE_DB", ":memory:"),
+		StudiesPath:   envOr("SCANNER_STUDIES_PATH", "studies.jsonl"),
+		StudiesFormat: envOr("SCANNER_STUDIES_FORMAT", "text"),
+		User:          envOr("SCANNER_USER", "global"),
 	}
 }
 
