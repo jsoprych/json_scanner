@@ -30,7 +30,6 @@ import (
 	"cetus-marketdata-scanner/internal/digest"
 	"cetus-marketdata-scanner/internal/scan"
 	"cetus-marketdata-scanner/internal/scanner"
-	"cetus-marketdata-scanner/internal/screen"
 	"cetus-marketdata-scanner/internal/sentinel"
 	"cetus-marketdata-scanner/internal/snapshot"
 	"cetus-marketdata-scanner/internal/store"
@@ -170,17 +169,32 @@ func runScan(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	log.Info("scan complete", "scanned", scanned, "signals", signals)
 }
 
-// scanToDigest runs the concurrent universe scan and assembles the digest. Shared
-// by the CLI digest and the serve dashboard so both compute identically.
-func scanToDigest(ctx context.Context, log *slog.Logger, st *store.Store, universe []string, cfg config.Config) (digest.Digest, scan.Result) {
+// scanAndBuild scans the universe, materializes the snapshot into the scanner's own
+// store, and assembles the digest from the acting user's tier-accessible studies.
+// Shared by the CLI digest and the serve dashboard so both are study-driven.
+func scanAndBuild(ctx context.Context, log *slog.Logger, st *store.Store, universe []string, cfg config.Config) (digest.Digest, scan.Result, error) {
 	since := time.Now().UTC().AddDate(0, 0, -cfg.DigestLookbackDays).Unix()
 	res := scan.Universe(ctx, st, universe, scan.Options{
-		Since:        since,
-		MinDollarVol: cfg.MinDollarVol,
-		Workers:      cfg.DigestWorkers,
+		Since: since, MinDollarVol: 0, Workers: cfg.DigestWorkers, // studies set their own liquidity in SQL
 	}, log)
-	presets := screen.MVPPresets(cfg.DigestTopN, cfg.DigestMomentumN)
-	return digest.Build(res.Day, len(res.Rows), res.Rows, presets), res
+
+	snap, err := snapshot.Open(cfg.StoreDB)
+	if err != nil {
+		return digest.Digest{}, res, fmt.Errorf("open store %q: %w", cfg.StoreDB, err)
+	}
+	defer snap.Close()
+	if err := snap.Load(res.Rows, res.Day.Unix()); err != nil {
+		return digest.Digest{}, res, fmt.Errorf("materialize snapshot: %w", err)
+	}
+
+	all, err := study.LoadFile(cfg.StudiesPath)
+	if err != nil {
+		return digest.Digest{}, res, fmt.Errorf("load studies %q: %w", cfg.StudiesPath, err)
+	}
+	u := user.Global()
+	u.ID = cfg.User
+	d, err := digest.FromStudies(res.Day, res.Rows, snap, study.Accessible(all, u))
+	return d, res, err
 }
 
 // runDigest builds the daily post-close digest and renders it to stdout or a file.
@@ -189,10 +203,13 @@ func runDigest(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	defer st.Close()
 
 	log.Info("digest starting", "db", cfg.DBPath, "symbols", len(universe),
-		"lookback_days", cfg.DigestLookbackDays, "min_dollar_vol", cfg.MinDollarVol,
-		"workers", cfg.DigestWorkers)
+		"lookback_days", cfg.DigestLookbackDays, "studies", cfg.StudiesPath, "user", cfg.User)
 
-	d, res := scanToDigest(ctx, log, st, universe, cfg)
+	d, res, err := scanAndBuild(ctx, log, st, universe, cfg)
+	if err != nil {
+		log.Error("build digest failed", "error", err)
+		os.Exit(1)
+	}
 
 	out := os.Stdout
 	if cfg.DigestOut != "" {
@@ -367,20 +384,10 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		if cfg.MaxSymbols > 0 && len(universe) > cfg.MaxSymbols {
 			universe = universe[:cfg.MaxSymbols]
 		}
-		since := time.Now().UTC().AddDate(0, 0, -cfg.DigestLookbackDays).Unix()
-		// One scan, no floor: keep every row so the data-quality watch sees thin names;
-		// the digest sections use the liquid subset.
-		res := scan.Universe(ctx, st, universe, scan.Options{
-			Since: since, MinDollarVol: 0, Workers: cfg.DigestWorkers,
-		}, log)
-		liquid := make([]screen.SnapshotRow, 0, len(res.Rows))
-		for _, r := range res.Rows {
-			if r.DollarVol >= cfg.MinDollarVol {
-				liquid = append(liquid, r)
-			}
+		d, res, err := scanAndBuild(ctx, log, st, universe, cfg)
+		if err != nil {
+			return nil, err
 		}
-		presets := screen.MVPPresets(cfg.DigestTopN, cfg.DigestMomentumN)
-		d := digest.Build(res.Day, len(liquid), liquid, presets)
 		flags := sentinel.Tier0(res.Rows, sentinel.DefaultTier0())
 		suspect, watch := sentinel.Counts(flags)
 
@@ -401,7 +408,7 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		if err := m.HTML(&buf); err != nil {
 			return nil, err
 		}
-		log.Info("dashboard rendered", "eligible", len(liquid), "flagged", len(flags),
+		log.Info("dashboard rendered", "scanned", res.Scanned, "flagged", len(flags),
 			"day", res.Day.Format("2006-01-02"))
 		return buf.Bytes(), nil
 	}

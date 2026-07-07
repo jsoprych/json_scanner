@@ -7,23 +7,41 @@ import (
 	"time"
 
 	"cetus-marketdata-scanner/internal/screen"
+	"cetus-marketdata-scanner/internal/snapshot"
+	"cetus-marketdata-scanner/internal/study"
 )
 
-func TestRender(t *testing.T) {
+func TestRenderFromStudies(t *testing.T) {
 	rows := []screen.SnapshotRow{
-		{Symbol: "NVDA", Close: 132.4, RSI14: 68, Ret3m: 0.21, DollarVol: 5.2e9,
-			High: 132.4, High52w: 132.4, SMA200: 100, SMA50: 120, PrevClose: 130, PrevSMA200: 99, PrevSMA50: 119},
-		{Symbol: "TINY", Close: 3.1, RSI14: 33, Ret3m: -0.05, DollarVol: 4e5,
-			High52w: 9, PrevRSI14: 28, PrevClose: 3.0, SMA50: 3.2, SMA200: 3.5, PrevSMA50: 3.2, PrevSMA200: 3.5},
+		{Symbol: "NVDA", Close: 132.4, High: 132.4, RSI14: 68, Ret3m: 0.21, DollarVol: 5.2e9,
+			SMA50: 120, SMA200: 100, PrevClose: 130, PrevSMA50: 119, PrevSMA200: 99, High52w: 132.4},
+		{Symbol: "TINY", Close: 3.1, High: 3.1, RSI14: 33, Ret3m: -0.05, DollarVol: 4e5,
+			SMA50: 3.2, SMA200: 3.5, PrevClose: 3.0, PrevSMA50: 3.2, PrevSMA200: 3.5, PrevRSI14: 28, High52w: 9},
 	}
-	presets := screen.MVPPresets(8, 10)
-	d := Build(time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC), 2110, rows, presets)
 
-	if d.SymbolsScanned != 2110 {
-		t.Errorf("scanned = %d", d.SymbolsScanned)
+	snap, err := snapshot.Open("")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(d.Sections) != 4 {
-		t.Fatalf("expected 4 sections, got %d", len(d.Sections))
+	defer snap.Close()
+	if err := snap.Load(rows, 123); err != nil {
+		t.Fatal(err)
+	}
+
+	studies := []study.Study{
+		{Key: "momentum", Title: "Momentum Leaders", Emoji: "🚀", Where: "ret_3m IS NOT NULL", OrderBy: "ret_3m DESC", Limit: 10},
+		{Key: "highs", Title: "New Highs", Emoji: "📈", Where: "high >= high_52w", OrderBy: "dollar_vol DESC", Limit: 8},
+	}
+
+	d, err := FromStudies(time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC), rows, snap, studies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Sections) != 2 {
+		t.Fatalf("sections = %d", len(d.Sections))
+	}
+	if d.SymbolsScanned != 2 {
+		t.Errorf("scanned = %d", d.SymbolsScanned)
 	}
 
 	var html bytes.Buffer

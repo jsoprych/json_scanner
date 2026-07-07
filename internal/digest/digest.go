@@ -15,14 +15,16 @@ import (
 	texttemplate "text/template"
 
 	"cetus-marketdata-scanner/internal/screen"
+	"cetus-marketdata-scanner/internal/snapshot"
+	"cetus-marketdata-scanner/internal/study"
 )
 
-// Section is one preset's ranked result within the digest.
+// Section is one study's result within the digest.
 type Section struct {
-	Key   string              `json:"key"`
-	Title string              `json:"title"`
-	Emoji string              `json:"emoji"`
-	Rows  []screen.SnapshotRow `json:"rows"`
+	Key   string           `json:"key"`
+	Title string           `json:"title"`
+	Emoji string           `json:"emoji"`
+	Rows  []snapshot.Match `json:"rows"`
 }
 
 // Digest is the full rendered-ready daily report.
@@ -34,25 +36,25 @@ type Digest struct {
 	Sections       []Section       `json:"sections"`
 }
 
-// Build assembles a Digest for the given trading day. presets are applied to rows
-// (already liquidity-filtered by the caller) to produce the sections.
-func Build(day time.Time, scanned int, rows []screen.SnapshotRow, presets []screen.Preset) Digest {
-	sections := make([]Section, 0, len(presets))
-	for _, p := range presets {
-		sections = append(sections, Section{
-			Key:   p.Key,
-			Title: p.Title,
-			Emoji: p.Emoji,
-			Rows:  p.Run(rows),
-		})
+// FromStudies assembles a Digest by running each study against the materialized
+// snapshot store — the digest sections are now driven by the SQL-WHERE studies, not
+// hardcoded presets. rows are the full scanned set (for the breadth aggregate).
+func FromStudies(day time.Time, rows []screen.SnapshotRow, snap *snapshot.DB, studies []study.Study) (Digest, error) {
+	sections := make([]Section, 0, len(studies))
+	for _, s := range studies {
+		matches, err := snap.Run(s)
+		if err != nil {
+			return Digest{}, err
+		}
+		sections = append(sections, Section{Key: s.Key, Title: s.Title, Emoji: s.Emoji, Rows: matches})
 	}
 	return Digest{
 		DateLabel:      day.Format("Monday, January 2, 2006"),
 		GeneratedAt:    time.Now().UTC(),
-		SymbolsScanned: scanned,
+		SymbolsScanned: len(rows),
 		Breadth:        screen.ComputeBreadth(rows),
 		Sections:       sections,
-	}
+	}, nil
 }
 
 // JSON writes the digest as indented JSON (the API / mail-layer payload).
