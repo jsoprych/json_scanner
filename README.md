@@ -22,6 +22,11 @@ cetus-marketdata-pipeline  ──(SQLite: adjusted_bars)──►  cetus-marketd
 | `scanner serve` | The digest as a **live HTML dashboard** over HTTP (cached, `?refresh=1` to force) |
 | `scanner anomalies` | **Data-quality pass** (Sentinel Tier-0): flags extreme-move × thin-liquidity × price/200-DMA outliers as text/JSONL — the deterministic seam the future cross-source + LLM tiers extend |
 | `scanner studies` | Materializes the snapshot into the scanner's **own SQLite store** and runs a user's **tier-accessible SQL-`WHERE` studies** (`studies.jsonl`) — pre-DSL, SQL is the study language |
+| `scanner users` | List the seeded users (id · tier · role) from `users.jsonl` |
+
+Studies are **owned by a user and tier-gated**: `SCANNER_USER` picks the acting
+user (`users.jsonl` → id/tier/role); free users see free studies, pro unlocks pro,
+**admin sees all**. The digest/dashboard render exactly the acting user's studies.
 
 Any mode scans the universe chosen by `SCANNER_UNIVERSE` (`all` · `exchange:NASDAQ`
 · `list:sp500` · `file:tickers.txt`).
@@ -130,7 +135,8 @@ the read-only cetus warehouse**:
 | `SCANNER_STORE_DB` | `:memory:` | The scanner's own SQLite store (snapshot materialization). Memory-first; a path (e.g. `scanner.db`) persists it for `sqlite3` inspection |
 | `SCANNER_STUDIES_PATH` | `studies.jsonl` | JSONL of SQL-`WHERE` studies (owner + tier per line) |
 | `SCANNER_STUDIES_FORMAT` | `text` | `text` \| `jsonl` |
-| `SCANNER_USER` | `global` | Acting user id (owner); tier gates which studies run |
+| `SCANNER_USERS_PATH` | `users.jsonl` | User registry (id · tier · role) |
+| `SCANNER_USER` | `global` | Acting user id — resolved against the registry; tier/role gate access |
 
 ## Layout
 
@@ -145,7 +151,7 @@ internal/scan/        concurrent whole-universe snapshot (worker pool, BarLoader
 internal/sentinel/    data-quality Tier-0 flags (deterministic; AI tiers extend it)
 internal/snapshot/    scanner's OWN SQLite store; materialize snapshot + run SQL studies
 internal/study/       studies as data (SQL-WHERE, JSONL, owner + tier)
-internal/user/        User entity + tiers (global user for now; monetization gate)
+internal/user/        User entity: tiers + roles + JSONL registry (admin/regular; monetization gate)
 internal/digest/      Digest assembly + html/text/json renderers
 internal/dashboard/   admin ops-console renderer (serve)
 internal/config/      env-first configuration (SCANNER_*, CETUS_DB)

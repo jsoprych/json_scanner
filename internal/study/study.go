@@ -71,6 +71,10 @@ func LoadFile(path string) ([]Study, error) {
 func Accessible(studies []Study, u user.User) []Study {
 	var out []Study
 	for _, s := range studies {
+		if u.IsAdmin() { // admin sees every study, any owner, any tier
+			out = append(out, s)
+			continue
+		}
 		if s.Owner != user.GlobalID && s.Owner != u.ID {
 			continue
 		}

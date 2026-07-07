@@ -41,4 +41,9 @@ func TestLoadDefaultsAndAccess(t *testing.T) {
 	if len(alice) != 2 { // global free (a) + own (c)
 		t.Errorf("alice access = %d, want 2", len(alice))
 	}
+	// admin sees everything, regardless of owner or tier (even at free tier).
+	admin := Accessible(studies, user.User{ID: "root", Tier: user.TierFree, Role: user.RoleAdmin})
+	if len(admin) != 3 {
+		t.Errorf("admin access = %d, want 3 (all)", len(admin))
+	}
 }

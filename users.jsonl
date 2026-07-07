@@ -1,0 +1,5 @@
+# Seed users — one JSON per line. tier: free|pro. role: user|admin.
+# (Migrates into the scanner's own DB when real accounts arrive.)
+{"id":"admin","name":"Admin","tier":"pro","role":"admin"}
+{"id":"alice","name":"Alice","tier":"pro","role":"user"}
+{"id":"bob","name":"Bob","tier":"free","role":"user"}

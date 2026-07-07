@@ -64,7 +64,9 @@ type Config struct {
 	StudiesPath string
 	// StudiesFormat is the `studies` output: text (default) | jsonl.
 	StudiesFormat string
-	// User is the acting user id (owner) — "global" until real accounts exist.
+	// UsersPath is the JSONL user registry (id, tier, role).
+	UsersPath string
+	// User is the acting user id — resolved against UsersPath; tier/role gate access.
 	User string
 }
 
@@ -120,6 +122,7 @@ func Load() Config {
 		StoreDB:       envOr("SCANNER_STORE_DB", ":memory:"),
 		StudiesPath:   envOr("SCANNER_STUDIES_PATH", "studies.jsonl"),
 		StudiesFormat: envOr("SCANNER_STUDIES_FORMAT", "text"),
+		UsersPath:     envOr("SCANNER_USERS_PATH", "users.jsonl"),
 		User:          envOr("SCANNER_USER", "global"),
 	}
 }

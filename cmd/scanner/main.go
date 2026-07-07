@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -60,9 +61,41 @@ func main() {
 		runAnomalies(ctx, log, cfg)
 	case "studies":
 		runStudies(ctx, log, cfg)
+	case "users":
+		runUsers(log, cfg)
 	default:
-		log.Error("unknown subcommand", "arg", sub, "want", "scan|digest|serve|anomalies|studies")
+		log.Error("unknown subcommand", "arg", sub, "want", "scan|digest|serve|anomalies|studies|users")
 		os.Exit(2)
+	}
+}
+
+// actingUser resolves the SCANNER_USER id against the registry. Falls back to the
+// Global superuser for "global", or a plain free user for an unknown id.
+func actingUser(log *slog.Logger, cfg config.Config) user.User {
+	if reg, err := user.LoadFile(cfg.UsersPath); err == nil {
+		if u, ok := reg.Find(cfg.User); ok {
+			return u
+		}
+	} else {
+		log.Warn("users registry not loaded; using defaults", "path", cfg.UsersPath, "error", err)
+	}
+	if cfg.User == "" || cfg.User == user.GlobalID {
+		return user.Global()
+	}
+	log.Warn("acting user not in registry; treating as free", "user", cfg.User)
+	return user.User{ID: cfg.User, Name: cfg.User, Tier: user.TierFree, Role: user.RoleUser}
+}
+
+// runUsers lists the seeded users.
+func runUsers(log *slog.Logger, cfg config.Config) {
+	reg, err := user.LoadFile(cfg.UsersPath)
+	if err != nil {
+		log.Error("load users failed", "path", cfg.UsersPath, "error", err)
+		os.Exit(1)
+	}
+	fmt.Printf("USERS (%s)\n", cfg.UsersPath)
+	for _, u := range reg.All() {
+		fmt.Printf("  %-8s %-10s tier=%-4s role=%s\n", u.ID, u.Name, u.Tier, u.Role)
 	}
 }
 
@@ -191,8 +224,7 @@ func scanAndBuild(ctx context.Context, log *slog.Logger, st *store.Store, univer
 	if err != nil {
 		return digest.Digest{}, res, fmt.Errorf("load studies %q: %w", cfg.StudiesPath, err)
 	}
-	u := user.Global()
-	u.ID = cfg.User
+	u := actingUser(log, cfg)
 	d, err := digest.FromStudies(res.Day, res.Rows, snap, study.Accessible(all, u))
 	return d, res, err
 }
@@ -297,9 +329,8 @@ func runStudies(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		log.Error("load studies failed", "path", cfg.StudiesPath, "error", err)
 		os.Exit(1)
 	}
-	// Acting user (global for now); tier gates which studies are accessible.
-	u := user.Global()
-	u.ID = cfg.User
+	// Acting user resolved from the registry; tier/role gate which studies run.
+	u := actingUser(log, cfg)
 	studies := study.Accessible(all, u)
 
 	since := time.Now().UTC().AddDate(0, 0, -cfg.DigestLookbackDays).Unix()
@@ -440,7 +471,14 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		w.Write(body)
 	})
 
-	srv := &http.Server{Addr: cfg.ServeAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	// Bind first, so a port collision fails immediately with a clear error instead of
+	// after a misleading "serving" log.
+	ln, err := net.Listen("tcp", cfg.ServeAddr)
+	if err != nil {
+		log.Error("cannot bind dashboard address (port already in use?)", "addr", cfg.ServeAddr, "error", err)
+		os.Exit(1)
+	}
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-ctx.Done()
 		shCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -448,8 +486,8 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		srv.Shutdown(shCtx)
 	}()
 
-	log.Info("dashboard serving", "addr", cfg.ServeAddr, "db", cfg.DBPath, "ttl_secs", cfg.ServeTTLSecs)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	log.Info("dashboard serving", "addr", ln.Addr().String(), "db", cfg.DBPath, "ttl_secs", cfg.ServeTTLSecs)
+	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 		log.Error("serve failed", "error", err)
 		os.Exit(1)
 	}
