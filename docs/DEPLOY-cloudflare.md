@@ -59,9 +59,10 @@ an admin can then upgrade it.
 ## Simpler (less secure) alternative: built-in login over the tunnel
 
 If you don't want Access, set `SCANNER_AUTH_MODE=login` (comment the `SCANNER_JWT_*`
-lines) and the scanner serves its own `/login`. **Then change the dev passwords in
-`users.jsonl`** — the built-in login is sha256, unsalted, unthrottled, and was built
-for a LAN, not the public internet. Prefer Access for anything public-facing.
+lines) and the scanner serves its own `/login`. Passwords are **salted PBKDF2-SHA256**
+(600k iterations), but the login is still **unthrottled** (no brute-force/rate limit
+or CSRF) and was built for a LAN. **Change the dev passwords** and prefer Access for
+anything public-facing.
 
 ## Notes
 

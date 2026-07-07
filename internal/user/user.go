@@ -7,16 +7,25 @@ package user
 
 import (
 	"bufio"
+	"crypto/pbkdf2"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 )
+
+// pwEnc encodes salt/derived-key in password hashes (compact, unpadded).
+var pwEnc = base64.RawStdEncoding
+
+const pbkdf2Iter = 600000 // OWASP-recommended for PBKDF2-HMAC-SHA256
 
 // Tier is a subscription level. Higher tiers can access more studies.
 type Tier string
@@ -49,7 +58,8 @@ type User struct {
 	Tier       Tier   `json:"tier"`
 	Role       Role   `json:"role"`
 	Groups     []string `json:"groups,omitempty"`      // group memberships (for group-visible studies)
-	PassSHA256 string   `json:"pass_sha256,omitempty"` // hex sha256 of the password
+	PassHash   string   `json:"pass_hash,omitempty"`   // salted PBKDF2: pbkdf2_sha256$iter$salt$dk
+	PassSHA256 string   `json:"pass_sha256,omitempty"` // legacy unsalted sha256 (read-only compat)
 	Disabled   bool     `json:"disabled,omitempty"`    // disabled users can't sign in
 }
 
@@ -67,25 +77,60 @@ func (u User) InGroup(g string) bool {
 	return false
 }
 
-// SetPassword stores the sha256 of pw. (Dev-grade; production should use a salted
-// KDF like bcrypt/argon2 — a deliberate no-new-dependency choice for now.)
+// SetPassword stores a salted PBKDF2-HMAC-SHA256 hash of pw and clears any legacy
+// hash. Salt is random per set, so identical passwords hash differently.
 func (u *User) SetPassword(pw string) {
-	sum := sha256.Sum256([]byte(pw))
-	u.PassSHA256 = hex.EncodeToString(sum[:])
+	salt := make([]byte, 16)
+	rand.Read(salt)
+	dk, _ := pbkdf2.Key(sha256.New, pw, salt, pbkdf2Iter, 32)
+	u.PassHash = fmt.Sprintf("pbkdf2_sha256$%d$%s$%s", pbkdf2Iter, pwEnc.EncodeToString(salt), pwEnc.EncodeToString(dk))
+	u.PassSHA256 = ""
 }
 
-// CheckPassword reports whether pw matches, in constant time. A disabled user or one
-// without a password never matches.
+// CheckPassword reports whether pw matches, in constant time. Prefers the PBKDF2
+// hash; falls back to the legacy unsalted sha256 for un-migrated accounts. A
+// disabled user, or one with no password, never matches.
 func (u User) CheckPassword(pw string) bool {
-	if u.Disabled || u.PassSHA256 == "" {
+	if u.Disabled {
 		return false
 	}
-	want, err := hex.DecodeString(u.PassSHA256)
+	if u.PassHash != "" {
+		return checkPBKDF2(u.PassHash, pw)
+	}
+	if u.PassSHA256 != "" { // legacy
+		want, err := hex.DecodeString(u.PassSHA256)
+		if err != nil {
+			return false
+		}
+		sum := sha256.Sum256([]byte(pw))
+		return subtle.ConstantTimeCompare(sum[:], want) == 1
+	}
+	return false
+}
+
+// checkPBKDF2 verifies a "pbkdf2_sha256$iter$salt$dk" hash.
+func checkPBKDF2(stored, pw string) bool {
+	parts := strings.Split(stored, "$")
+	if len(parts) != 4 || parts[0] != "pbkdf2_sha256" {
+		return false
+	}
+	iter, err := strconv.Atoi(parts[1])
+	if err != nil || iter < 1 {
+		return false
+	}
+	salt, err := pwEnc.DecodeString(parts[2])
 	if err != nil {
 		return false
 	}
-	sum := sha256.Sum256([]byte(pw))
-	return subtle.ConstantTimeCompare(sum[:], want) == 1
+	want, err := pwEnc.DecodeString(parts[3])
+	if err != nil {
+		return false
+	}
+	dk, err := pbkdf2.Key(sha256.New, pw, salt, iter, len(want))
+	if err != nil {
+		return false
+	}
+	return subtle.ConstantTimeCompare(dk, want) == 1
 }
 
 // GlobalID is the owner id for shared, system-owned entities.

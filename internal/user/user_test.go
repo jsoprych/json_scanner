@@ -1,9 +1,44 @@
 package user
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 )
+
+func TestPassword(t *testing.T) {
+	var u User
+	u.SetPassword("hunter2")
+	if !strings.HasPrefix(u.PassHash, "pbkdf2_sha256$") {
+		t.Fatalf("unexpected hash format: %s", u.PassHash)
+	}
+	if u.PassSHA256 != "" {
+		t.Error("legacy hash should be cleared on set")
+	}
+	if !u.CheckPassword("hunter2") {
+		t.Error("correct password should verify")
+	}
+	if u.CheckPassword("wrong") {
+		t.Error("wrong password must not verify")
+	}
+	// salted: same password, different hash.
+	var u2 User
+	u2.SetPassword("hunter2")
+	if u2.PassHash == u.PassHash {
+		t.Error("salt should make identical passwords hash differently")
+	}
+	// disabled never matches.
+	u.Disabled = true
+	if u.CheckPassword("hunter2") {
+		t.Error("disabled user must not verify")
+	}
+	// legacy unsalted sha256 still verifies (back-compat).
+	sum := sha256.Sum256([]byte("legacy"))
+	if !(User{PassSHA256: hex.EncodeToString(sum[:])}).CheckPassword("legacy") {
+		t.Error("legacy sha256 should still verify")
+	}
+}
 
 func TestRegistryLoad(t *testing.T) {
 	data := `
