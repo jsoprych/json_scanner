@@ -130,11 +130,27 @@ Env-only (stdlib, no flags framework yet).
 | `SCANNER_AUTH_MODE` | `login` | `login` (built-in sessions) or `proxy` (trust a reverse-proxy identity header) |
 | `SCANNER_TRUSTED_USER_HEADER` | `X-Token-User` | In `proxy` mode, the header carrying the authenticated user id |
 
-**Reverse-proxy auth (caddy-security etc.):** set `SCANNER_AUTH_MODE=proxy` and bind
-loopback (`SCANNER_SERVE_ADDR=127.0.0.1:8080`). The proxy authenticates (OAuth/OIDC/
-MFA/TLS) and injects the user id header; the scanner reads it, looks up tier/role in
-its user store (unknown users default to free/user), and skips its own login. Only
-trust the header when the scanner is reachable *only* via the proxy.
+**Reverse-proxy auth (caddy-security etc.):** set `SCANNER_AUTH_MODE=proxy`. The
+proxy authenticates (OAuth/OIDC/MFA/TLS); the scanner reads the identity, looks up
+tier/role in its user store (unknown users default to free/user), and skips its own
+login. Two trust levels:
+
+- **Raw header** (`SCANNER_TRUSTED_USER_HEADER`): only safe when the scanner is
+  reachable *only* via the proxy — bind loopback (`SCANNER_SERVE_ADDR=127.0.0.1:8080`).
+- **Verified JWT** (recommended): set a key and the identity comes from a
+  signature-checked token instead of a spoofable header.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `SCANNER_JWT_HMAC_SECRET` | — | HS256/384/512 shared secret (enables JWT verify) |
+| `SCANNER_JWT_PUBKEY_FILE` | — | RS256/384/512 RSA public key PEM (alternative) |
+| `SCANNER_JWT_HEADER` | `Authorization` | Header carrying the token (`Bearer` stripped) |
+| `SCANNER_JWT_USER_CLAIM` | `sub` | Claim holding the user id |
+| `SCANNER_JWT_ISSUER` / `SCANNER_JWT_AUDIENCE` | — | Optional `iss` / `aud` to enforce |
+
+The verifier is stdlib-only, checks `exp`/`nbf`/`iss`/`aud`, and is **bound to one
+key type** — an HMAC verifier rejects `RS*` tokens and vice-versa, and `alg=none` is
+never accepted (defeats alg-confusion attacks).
 
 **Studies & the scanner's own store** (`studies`) — the store is **separate from
 the read-only cetus warehouse**:
@@ -161,6 +177,7 @@ internal/sentinel/    data-quality Tier-0 flags (deterministic; AI tiers extend 
 internal/snapshot/    scanner's OWN SQLite store; materialize snapshot + run SQL studies
 internal/study/       studies as data (SQL-WHERE, JSONL, owner + tier)
 internal/user/        User entity + file-backed Store: tiers, roles, sha256 login, CRUD
+internal/authjwt/     stdlib JWT verifier (HS/RS, alg-confusion-safe) for proxy auth
 internal/digest/      Digest assembly + html/text/json renderers
 internal/dashboard/   admin ops-console renderer (serve)
 internal/config/      env-first configuration (SCANNER_*, CETUS_DB)

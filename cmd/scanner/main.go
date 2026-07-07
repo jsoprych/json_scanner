@@ -28,6 +28,7 @@ import (
 	"syscall"
 	"time"
 
+	"cetus-marketdata-scanner/internal/authjwt"
 	"cetus-marketdata-scanner/internal/config"
 	"cetus-marketdata-scanner/internal/dashboard"
 	"cetus-marketdata-scanner/internal/digest"
@@ -488,9 +489,28 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		log.Error("bad SCANNER_AUTH_MODE", "mode", cfg.AuthMode, "want", "login|proxy")
 		os.Exit(2)
 	}
-	if cfg.AuthMode == authModeProxy && !isLoopback(cfg.ServeAddr) {
-		log.Warn("proxy auth on a non-loopback bind: the identity header is spoofable unless only the reverse proxy can reach this port — bind 127.0.0.1",
-			"addr", cfg.ServeAddr, "header", cfg.TrustedUserHeader)
+	// Optional JWT verification for proxy mode (verified token beats a raw header).
+	var jwtVer *authjwt.Verifier
+	if cfg.AuthMode == authModeProxy {
+		switch {
+		case cfg.JWTHMACSecret != "":
+			jwtVer = authjwt.NewHMAC([]byte(cfg.JWTHMACSecret), cfg.JWTUserClaim, cfg.JWTIssuer, cfg.JWTAudience)
+			log.Info("proxy auth: JWT HMAC verification enabled", "header", cfg.JWTHeader, "claim", cfg.JWTUserClaim)
+		case cfg.JWTPubKeyFile != "":
+			pub, err := authjwt.LoadRSAPublicKeyPEM(cfg.JWTPubKeyFile)
+			if err != nil {
+				log.Error("load JWT public key failed", "file", cfg.JWTPubKeyFile, "error", err)
+				os.Exit(1)
+			}
+			jwtVer = authjwt.NewRSA(pub, cfg.JWTUserClaim, cfg.JWTIssuer, cfg.JWTAudience)
+			log.Info("proxy auth: JWT RSA verification enabled", "header", cfg.JWTHeader, "claim", cfg.JWTUserClaim, "key", cfg.JWTPubKeyFile)
+		default:
+			log.Warn("proxy auth: no JWT key set — trusting the raw identity header (weaker). Set SCANNER_JWT_HMAC_SECRET or SCANNER_JWT_PUBKEY_FILE to verify a signed token.")
+		}
+		if !isLoopback(cfg.ServeAddr) && jwtVer == nil {
+			log.Warn("proxy auth on a non-loopback bind with no JWT verification: the identity header is spoofable — bind 127.0.0.1 or configure a JWT key",
+				"addr", cfg.ServeAddr, "header", cfg.TrustedUserHeader)
+		}
 	}
 
 	sessions := newSessionStore()
@@ -584,7 +604,21 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	// with no local profile gets default free/user entitlement.
 	identify := func(r *http.Request) (user.User, bool) {
 		if cfg.AuthMode == authModeProxy {
-			id := strings.TrimSpace(r.Header.Get(cfg.TrustedUserHeader))
+			var id string
+			if jwtVer != nil { // verify a signed token
+				tok := strings.TrimSpace(strings.TrimPrefix(r.Header.Get(cfg.JWTHeader), "Bearer "))
+				if tok == "" {
+					return user.User{}, false
+				}
+				uid, err := jwtVer.Verify(tok)
+				if err != nil {
+					log.Warn("jwt verify failed", "error", err)
+					return user.User{}, false
+				}
+				id = uid
+			} else { // trust the raw header (must be loopback-only)
+				id = strings.TrimSpace(r.Header.Get(cfg.TrustedUserHeader))
+			}
 			if id == "" {
 				return user.User{}, false
 			}
