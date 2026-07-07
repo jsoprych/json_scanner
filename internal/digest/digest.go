@@ -44,7 +44,9 @@ func FromStudies(day time.Time, rows []screen.SnapshotRow, snap *snapshot.DB, st
 	for _, s := range studies {
 		matches, err := snap.Run(s)
 		if err != nil {
-			return Digest{}, err
+			// A single broken WHERE (bad SQL) must not sink the whole page — skip it.
+			// The study editor's Test button is where authors catch these.
+			continue
 		}
 		sections = append(sections, Section{Key: s.Key, Title: s.Title, Emoji: s.Emoji, Rows: matches})
 	}

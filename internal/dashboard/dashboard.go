@@ -4,6 +4,7 @@
 package dashboard
 
 import (
+	"encoding/json"
 	"html/template"
 	"io"
 	"math"
@@ -13,6 +14,7 @@ import (
 	"cetus-marketdata-scanner/internal/digest"
 	"cetus-marketdata-scanner/internal/sentinel"
 	"cetus-marketdata-scanner/internal/store"
+	"cetus-marketdata-scanner/internal/study"
 	"cetus-marketdata-scanner/internal/user"
 )
 
@@ -30,6 +32,7 @@ type Model struct {
 	Suspect     int
 	Watch       int
 	Users       []user.User
+	Studies     []study.Study // raw definitions for the admin study editor
 }
 
 // IndexHTML renders the user-facing dashboard (route "/").
@@ -132,6 +135,10 @@ var funcs = template.FuncMap{
 	"ratio": ratio, "humanInt": humanInt, "dbSize": dbSize, "ms": ms,
 	"int64": func(n int) int64 { return int64(n) },
 	"join":  func(ss []string) string { return strings.Join(ss, ", ") },
+	"studiesJSON": func(ss []study.Study) template.JS {
+		b, _ := json.Marshal(ss)
+		return template.JS(b)
+	},
 	"gt0":   func(v float64) bool { return v > 0.05 },
 	"lt0":   func(v float64) bool { return v < -0.05 },
 	"upper": func(s sentinel.Severity) string {

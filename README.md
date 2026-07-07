@@ -19,7 +19,7 @@ cetus-marketdata-pipeline  ──(SQLite: adjusted_bars)──►  cetus-marketd
 |---------|--------------|
 | `scanner` / `scanner scan` | Per-symbol **JSONL signal stream** (volume / price / gap breakouts) on stdout |
 | `scanner digest` | **Daily post-close digest** — whole-universe snapshot → market breadth + preset studies (52-wk highs, golden cross, oversold bounce, momentum leaders), rendered `html` / `text` / `json` |
-| `scanner serve` | Live HTTP dashboard with **per-session login**. **`/login`** signs in (session cookie); **`/`** = user dashboard (breadth + the acting user's tier-accessible studies); **`/admin`** = operator console + **user CRUD** (create / tier / role / disable / delete), **admin-only**. Sign out switches users. Cached scan (`?refresh=1`) |
+| `scanner serve` | Live HTTP dashboard with **per-session login**. **`/login`** signs in; **`/`** = user dashboard (breadth + the acting user's studies); **`/admin`** = operator console + **user CRUD** + **study editor** (write/test/save SQL-`WHERE` studies with a live preview), **admin-only**. Sign out switches users. Cached scan (`?refresh=1`) |
 | `scanner anomalies` | **Data-quality pass** (Sentinel Tier-0): flags extreme-move × thin-liquidity × price/200-DMA outliers as text/JSONL — the deterministic seam the future cross-source + LLM tiers extend |
 | `scanner studies` | Materializes the snapshot into the scanner's **own SQLite store** and runs a user's **tier-accessible SQL-`WHERE` studies** (`studies.jsonl`) — pre-DSL, SQL is the study language |
 | `scanner users` | List the seeded users (id · tier · role) from `users.jsonl` |

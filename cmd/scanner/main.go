@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -92,6 +93,14 @@ const (
 	authModeLogin = "login" // built-in login + sessions (standalone/dev)
 	authModeProxy = "proxy" // trust an identity header from a reverse proxy (caddy-security)
 )
+
+// atoiOr parses s as an int, returning def on failure.
+func atoiOr(s string, def int) int {
+	if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
+		return n
+	}
+	return def
+}
 
 // splitCSV parses a comma-separated list into trimmed, non-empty items.
 func splitCSV(s string) []string {
@@ -496,6 +505,11 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		log.Error("open users failed", "path", cfg.UsersPath, "error", err)
 		os.Exit(1)
 	}
+	studyStore, err := study.OpenStore(cfg.StudiesPath)
+	if err != nil {
+		log.Error("open studies failed", "path", cfg.StudiesPath, "error", err)
+		os.Exit(1)
+	}
 	if cfg.AuthMode != authModeLogin && cfg.AuthMode != authModeProxy {
 		log.Error("bad SCANNER_AUTH_MODE", "mode", cfg.AuthMode, "want", "login|proxy")
 		os.Exit(2)
@@ -588,10 +602,7 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 				return nil, err
 			}
 		}
-		allStudies, err := study.LoadFile(cfg.StudiesPath)
-		if err != nil {
-			return nil, err
-		}
+		allStudies := studyStore.All()
 		d, err := digest.FromStudies(cDay, cRows, snap, study.Accessible(allStudies, u))
 		if err != nil {
 			return nil, err
@@ -599,8 +610,22 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		return &dashboard.Model{
 			Acting: u, SessionAuth: cfg.AuthMode == authModeLogin,
 			Stats: cStats, DBSizeBytes: cSize, ScanMillis: cMillis,
-			Digest: d, Flags: cFlags, Suspect: cSus, Watch: cWat, Users: users.All(),
+			Digest: d, Flags: cFlags, Suspect: cSus, Watch: cWat,
+			Users: users.All(), Studies: allStudies,
 		}, nil
+	}
+
+	// preview runs an ad-hoc study against the current snapshot (the editor's Test
+	// button). Shares the scan cache/lock and validates the WHERE by executing it.
+	preview := func(st study.Study) ([]snapshot.Match, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if cRows == nil || time.Since(cAt) >= ttl {
+			if err := refresh(); err != nil {
+				return nil, err
+			}
+		}
+		return snap.Run(st)
 	}
 
 	sessionUser := func(r *http.Request) (user.User, bool) {
@@ -771,6 +796,85 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 			log.Warn("user admin action failed", "action", r.FormValue("action"), "id", id, "error", actErr)
 		} else {
 			log.Info("user admin action", "action", r.FormValue("action"), "id", id, "by", u.ID)
+		}
+		http.Redirect(w, r, "/admin", http.StatusSeeOther)
+	})
+
+	// Study editor: live WHERE preview (JSON).
+	mux.HandleFunc("/admin/studies/test", func(w http.ResponseWriter, r *http.Request) {
+		u, ok := requireUser(w, r)
+		if !ok {
+			return
+		}
+		if !u.IsAdmin() {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		r.ParseForm()
+		matches, err := preview(study.Study{Where: r.FormValue("where"), OrderBy: r.FormValue("order_by"), Limit: atoiOr(r.FormValue("limit"), 20)})
+		w.Header().Set("Content-Type", "application/json")
+		type resp struct {
+			Count  int      `json:"count"`
+			Sample []string `json:"sample"`
+			Error  string   `json:"error,omitempty"`
+		}
+		if err != nil {
+			json.NewEncoder(w).Encode(resp{Error: err.Error()})
+			return
+		}
+		sample := make([]string, 0, 12)
+		for i, m := range matches {
+			if i >= 12 {
+				break
+			}
+			sample = append(sample, m.Symbol)
+		}
+		json.NewEncoder(w).Encode(resp{Count: len(matches), Sample: sample})
+	})
+
+	// Study editor: save / delete.
+	mux.HandleFunc("/admin/studies", func(w http.ResponseWriter, r *http.Request) {
+		u, ok := requireUser(w, r)
+		if !ok {
+			return
+		}
+		if !u.IsAdmin() {
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprintln(w, "403 — admin only")
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Redirect(w, r, "/admin", http.StatusSeeOther)
+			return
+		}
+		r.ParseForm()
+		switch r.FormValue("action") {
+		case "save":
+			st := study.Study{
+				Key: r.FormValue("key"), Title: r.FormValue("title"), Emoji: r.FormValue("emoji"),
+				Owner: r.FormValue("owner"), Visibility: study.Visibility(r.FormValue("visibility")),
+				Group: r.FormValue("group"), Tier: user.Tier(r.FormValue("tier")),
+				Where: r.FormValue("where"), OrderBy: r.FormValue("order_by"), Limit: atoiOr(r.FormValue("limit"), 0),
+			}
+			if strings.TrimSpace(st.Where) != "" { // reject a broken WHERE before persisting
+				if _, perr := preview(study.Study{Where: st.Where, OrderBy: st.OrderBy, Limit: 1}); perr != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					fmt.Fprintf(w, "invalid WHERE: %v", perr)
+					return
+				}
+			}
+			if err := studyStore.Upsert(st); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				fmt.Fprintf(w, "cannot save study: %v", err)
+				return
+			}
+			log.Info("study saved", "key", st.Key, "by", u.ID)
+		case "delete":
+			if err := studyStore.Delete(r.FormValue("key")); err != nil {
+				log.Warn("study delete failed", "key", r.FormValue("key"), "error", err)
+			} else {
+				log.Info("study deleted", "key", r.FormValue("key"), "by", u.ID)
+			}
 		}
 		http.Redirect(w, r, "/admin", http.StatusSeeOther)
 	})
