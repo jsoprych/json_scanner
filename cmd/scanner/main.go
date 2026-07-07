@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"cetus-marketdata-scanner/internal/config"
+	"cetus-marketdata-scanner/internal/dashboard"
 	"cetus-marketdata-scanner/internal/digest"
 	"cetus-marketdata-scanner/internal/scan"
 	"cetus-marketdata-scanner/internal/scanner"
@@ -279,19 +280,50 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	var cachedAt time.Time
 
 	render := func() ([]byte, error) {
-		universe, err := st.Universe(ctx)
+		start := time.Now()
+		universe, err := resolveUniverse(ctx, st, cfg)
 		if err != nil {
 			return nil, err
 		}
 		if cfg.MaxSymbols > 0 && len(universe) > cfg.MaxSymbols {
 			universe = universe[:cfg.MaxSymbols]
 		}
-		d, res := scanToDigest(ctx, log, st, universe, cfg)
-		var buf bytes.Buffer
-		if err := d.HTML(&buf); err != nil {
+		since := time.Now().UTC().AddDate(0, 0, -cfg.DigestLookbackDays).Unix()
+		// One scan, no floor: keep every row so the data-quality watch sees thin names;
+		// the digest sections use the liquid subset.
+		res := scan.Universe(ctx, st, universe, scan.Options{
+			Since: since, MinDollarVol: 0, Workers: cfg.DigestWorkers,
+		}, log)
+		liquid := make([]screen.SnapshotRow, 0, len(res.Rows))
+		for _, r := range res.Rows {
+			if r.DollarVol >= cfg.MinDollarVol {
+				liquid = append(liquid, r)
+			}
+		}
+		presets := screen.MVPPresets(cfg.DigestTopN, cfg.DigestMomentumN)
+		d := digest.Build(res.Day, len(liquid), liquid, presets)
+		flags := sentinel.Tier0(res.Rows, sentinel.DefaultTier0())
+		suspect, watch := sentinel.Counts(flags)
+
+		stats, err := st.Stats(ctx)
+		if err != nil {
 			return nil, err
 		}
-		log.Info("dashboard rendered", "eligible", len(res.Rows), "day", res.Day.Format("2006-01-02"))
+		var size int64
+		if fi, e := os.Stat(cfg.DBPath); e == nil {
+			size = fi.Size()
+		}
+
+		m := dashboard.Model{
+			Stats: stats, DBSizeBytes: size, ScanMillis: time.Since(start).Milliseconds(),
+			Digest: d, Flags: flags, Suspect: suspect, Watch: watch,
+		}
+		var buf bytes.Buffer
+		if err := m.HTML(&buf); err != nil {
+			return nil, err
+		}
+		log.Info("dashboard rendered", "eligible", len(liquid), "flagged", len(flags),
+			"day", res.Day.Format("2006-01-02"))
 		return buf.Bytes(), nil
 	}
 

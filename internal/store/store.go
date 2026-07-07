@@ -106,6 +106,69 @@ func collectSymbols(rows *sql.Rows) ([]string, error) {
 	return out, rows.Err()
 }
 
+// OpsStats is warehouse / ingestion state for the admin dashboard.
+type OpsStats struct {
+	PipelineState   map[string]int // SUCCESS | PENDING | IN_FLIGHT | EMPTY | FAILED → count
+	RegistrySymbols int            // rows in the symbols master registry
+	EODBars         int64          // nominal bars ingested
+	Splits          int            // corporate actions in the split ledger
+}
+
+// Total is the tracked symbol count across all pipeline states.
+func (s OpsStats) Total() int {
+	t := 0
+	for _, n := range s.PipelineState {
+		t += n
+	}
+	return t
+}
+
+// Count returns the symbols in a given pipeline state.
+func (s OpsStats) Count(status string) int { return s.PipelineState[status] }
+
+// Pct returns a pipeline state's share of the tracked universe (0 if none).
+func (s OpsStats) Pct(status string) float64 {
+	if t := s.Total(); t > 0 {
+		return 100 * float64(s.PipelineState[status]) / float64(t)
+	}
+	return 0
+}
+
+// Stats gathers operational counts for the dashboard (cheap aggregate queries).
+func (s *Store) Stats(ctx context.Context) (OpsStats, error) {
+	out := OpsStats{PipelineState: map[string]int{}}
+	rows, err := s.db.QueryContext(ctx, `SELECT status, COUNT(*) FROM symbol_pipeline_state GROUP BY status`)
+	if err != nil {
+		return out, fmt.Errorf("stats pipeline_state: %w", err)
+	}
+	for rows.Next() {
+		var st string
+		var n int
+		if err := rows.Scan(&st, &n); err != nil {
+			rows.Close()
+			return out, err
+		}
+		out.PipelineState[st] = n
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	for _, q := range []struct {
+		sql string
+		dst any
+	}{
+		{`SELECT COUNT(*) FROM symbols`, &out.RegistrySymbols},
+		{`SELECT COUNT(*) FROM eod_bars`, &out.EODBars},
+		{`SELECT COUNT(*) FROM split_factors`, &out.Splits},
+	} {
+		if err := s.db.QueryRowContext(ctx, q.sql).Scan(q.dst); err != nil {
+			return out, fmt.Errorf("stats %q: %w", q.sql, err)
+		}
+	}
+	return out, nil
+}
+
 // LoadAdjustedBars returns split-adjusted daily bars for symbol with
 // timestamp >= since, ascending, straight from the adjusted_bars view (no
 // client-side split math).
