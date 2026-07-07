@@ -22,6 +22,9 @@ type Config struct {
 	GapPct float64
 	// MaxSymbols caps the scanned universe (0 = no cap; handy for testing).
 	MaxSymbols int
+	// Universe selects the scan set: "all" (default), "exchange:NASDAQ",
+	// "list:sp500" (a symbol_lists watchlist), or "file:/path/to/tickers.txt".
+	Universe string
 
 	// --- daily digest (the `digest` subcommand) ---
 
@@ -47,6 +50,9 @@ type Config struct {
 	ServeAddr string
 	// ServeTTLSecs caches the rendered scan; a request older than this recomputes.
 	ServeTTLSecs int
+
+	// AnomalyFormat is the `anomalies` output: text (default) | jsonl.
+	AnomalyFormat string
 }
 
 // defaultCetusDB is the fallback warehouse path. It stays pointed at the pipeline's
@@ -80,6 +86,7 @@ func Load() Config {
 		VolumeMult: envFloat("SCANNER_VOLUME_MULT", 2.0),
 		GapPct:     envFloat("SCANNER_GAP_PCT", 0.05),
 		MaxSymbols: envInt("SCANNER_MAX_SYMBOLS", 0),
+		Universe:   envOr("SCANNER_UNIVERSE", "all"),
 
 		DigestLookbackDays: envInt("SCANNER_DIGEST_LOOKBACK_DAYS", 400),
 		MinDollarVol:       envFloat("SCANNER_MIN_DOLLAR_VOL", 1e6),
@@ -91,6 +98,8 @@ func Load() Config {
 
 		ServeAddr:    envOr("SCANNER_SERVE_ADDR", ":8080"),
 		ServeTTLSecs: envInt("SCANNER_SERVE_TTL_SECS", 600),
+
+		AnomalyFormat: envOr("SCANNER_ANOMALY_FORMAT", "text"),
 	}
 }
 

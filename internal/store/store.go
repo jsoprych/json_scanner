@@ -58,6 +58,43 @@ func (s *Store) Universe(ctx context.Context) ([]string, error) {
 	}
 	defer rows.Close()
 
+	return collectSymbols(rows)
+}
+
+// UniverseExchange returns SUCCESS symbols listed on the given exchange
+// (e.g. 'NASDAQ', 'NYSE'), ascending. This is listing venue — for a curated index
+// like the S&P 500 use UniverseList against symbol_lists instead.
+func (s *Store) UniverseExchange(ctx context.Context, exchange string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT p.symbol FROM symbol_pipeline_state p
+JOIN symbols s ON s.symbol = p.symbol
+WHERE p.status='SUCCESS' AND s.exchange = ?
+ORDER BY p.symbol`, exchange)
+	if err != nil {
+		return nil, fmt.Errorf("load universe (exchange %q): %w", exchange, err)
+	}
+	defer rows.Close()
+	return collectSymbols(rows)
+}
+
+// UniverseList returns SUCCESS symbols that belong to the named symbol_lists
+// watchlist (e.g. 'sp500', 'nasdaq100'), ascending. Empty result = the list is not
+// populated (the pipeline owns writing symbol_lists).
+func (s *Store) UniverseList(ctx context.Context, listName string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT p.symbol FROM symbol_pipeline_state p
+JOIN symbol_lists l ON l.symbol = p.symbol
+WHERE p.status='SUCCESS' AND l.list_name = ?
+ORDER BY p.symbol`, listName)
+	if err != nil {
+		return nil, fmt.Errorf("load universe (list %q): %w", listName, err)
+	}
+	defer rows.Close()
+	return collectSymbols(rows)
+}
+
+// collectSymbols drains a single-column symbol result set.
+func collectSymbols(rows *sql.Rows) ([]string, error) {
 	var out []string
 	for rows.Next() {
 		var sym string

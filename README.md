@@ -20,6 +20,10 @@ cetus-marketdata-pipeline  ──(SQLite: adjusted_bars)──►  cetus-marketd
 | `scanner` / `scanner scan` | Per-symbol **JSONL signal stream** (volume / price / gap breakouts) on stdout |
 | `scanner digest` | **Daily post-close digest** — whole-universe snapshot → market breadth + preset studies (52-wk highs, golden cross, oversold bounce, momentum leaders), rendered `html` / `text` / `json` |
 | `scanner serve` | The digest as a **live HTML dashboard** over HTTP (cached, `?refresh=1` to force) |
+| `scanner anomalies` | **Data-quality pass** (Sentinel Tier-0): flags extreme-move × thin-liquidity × price/200-DMA outliers as text/JSONL — the deterministic seam the future cross-source + LLM tiers extend |
+
+Any mode scans the universe chosen by `SCANNER_UNIVERSE` (`all` · `exchange:NASDAQ`
+· `list:sp500` · `file:tickers.txt`).
 
 > **Phase 1 (MVP).** The `digest`/`serve` path is built on a small fixed set of
 > indicators (SMA 50/200, RSI(14), 52-wk high/low, 3-mo return, $-volume) computed
@@ -100,6 +104,8 @@ Env-only (stdlib, no flags framework yet).
 | `SCANNER_VOLUME_MULT` | `2.0` | Volume-breakout threshold (× trailing avg) |
 | `SCANNER_GAP_PCT` | `0.05` | Gap threshold (fraction vs prior close) |
 | `SCANNER_MAX_SYMBOLS` | `0` | Cap the scanned universe (0 = no cap) |
+| `SCANNER_UNIVERSE` | `all` | Scope: `all` \| `exchange:X` \| `list:NAME` \| `file:PATH` |
+| `SCANNER_ANOMALY_FORMAT` | `text` | `anomalies` output: `text` \| `jsonl` |
 
 **Digest & dashboard** (`digest` / `serve`):
 
@@ -125,6 +131,7 @@ internal/scanner/     pure Scan(symbol, bars, cfg) []Signal  (JSONL signals)
 internal/indicators/  pure indicator funcs (SMA, RSI, rolling high/low, return)
 internal/screen/      SnapshotRow build, preset studies, market breadth (pure)
 internal/scan/        concurrent whole-universe snapshot (worker pool, BarLoader iface)
+internal/sentinel/    data-quality Tier-0 flags (deterministic; AI tiers extend it)
 internal/digest/      Digest assembly + html/text/json renderers
 internal/config/      env-first configuration (SCANNER_*, CETUS_DB)
 internal/telemetry/   slog JSON logger (stderr)
