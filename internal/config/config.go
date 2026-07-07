@@ -50,6 +50,8 @@ type Config struct {
 	ServeAddr string
 	// ServeTTLSecs caches the rendered scan; a request older than this recomputes.
 	ServeTTLSecs int
+	// SessionHours is how long a login session stays valid.
+	SessionHours int
 
 	// AnomalyFormat is the `anomalies` output: text (default) | jsonl.
 	AnomalyFormat string
@@ -113,6 +115,7 @@ func Load() Config {
 
 		ServeAddr:    envOr("SCANNER_SERVE_ADDR", ":8080"),
 		ServeTTLSecs: envInt("SCANNER_SERVE_TTL_SECS", 600),
+		SessionHours: envInt("SCANNER_SESSION_HOURS", 8),
 
 		AnomalyFormat: envOr("SCANNER_ANOMALY_FORMAT", "text"),
 

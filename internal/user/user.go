@@ -7,11 +7,15 @@ package user
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"sync"
 )
 
 // Tier is a subscription level. Higher tiers can access more studies.
@@ -40,15 +44,38 @@ const (
 
 // User owns studies and other saved entities, at a subscription tier and role.
 type User struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Tier Tier   `json:"tier"`
-	Role Role   `json:"role"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Tier       Tier   `json:"tier"`
+	Role       Role   `json:"role"`
+	PassSHA256 string `json:"pass_sha256,omitempty"` // hex sha256 of the password
+	Disabled   bool   `json:"disabled,omitempty"`    // disabled users can't sign in
 }
 
 // IsAdmin reports the admin role — an admin sees every study regardless of owner or
 // tier.
 func (u User) IsAdmin() bool { return u.Role == RoleAdmin }
+
+// SetPassword stores the sha256 of pw. (Dev-grade; production should use a salted
+// KDF like bcrypt/argon2 — a deliberate no-new-dependency choice for now.)
+func (u *User) SetPassword(pw string) {
+	sum := sha256.Sum256([]byte(pw))
+	u.PassSHA256 = hex.EncodeToString(sum[:])
+}
+
+// CheckPassword reports whether pw matches, in constant time. A disabled user or one
+// without a password never matches.
+func (u User) CheckPassword(pw string) bool {
+	if u.Disabled || u.PassSHA256 == "" {
+		return false
+	}
+	want, err := hex.DecodeString(u.PassSHA256)
+	if err != nil {
+		return false
+	}
+	sum := sha256.Sum256([]byte(pw))
+	return subtle.ConstantTimeCompare(sum[:], want) == 1
+}
 
 // GlobalID is the owner id for shared, system-owned entities.
 const GlobalID = "global"
@@ -112,3 +139,141 @@ func (r *Registry) Find(id string) (User, bool) {
 
 // All returns every user, in file order.
 func (r *Registry) All() []User { return r.all }
+
+// Store is a mutable, JSONL-file-backed user registry, safe for concurrent use.
+// The admin dashboard creates/updates/deletes through it; every mutation atomically
+// rewrites the file. (Migrates into the scanner's own DB with real accounts.)
+type Store struct {
+	path string
+	mu   sync.Mutex
+	all  []User
+	byID map[string]User
+}
+
+// OpenStore loads a user store from path (a missing file yields an empty store).
+func OpenStore(path string) (*Store, error) {
+	s := &Store{path: path, byID: map[string]User{}}
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return s, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+	reg, err := LoadJSONL(f)
+	if err != nil {
+		return nil, err
+	}
+	s.all = reg.all
+	for _, u := range s.all {
+		s.byID[u.ID] = u
+	}
+	return s, nil
+}
+
+// All returns a copy of every user.
+func (s *Store) All() []User {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]User(nil), s.all...)
+}
+
+// Find returns the user with the given id.
+func (s *Store) Find(id string) (User, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u, ok := s.byID[id]
+	return u, ok
+}
+
+// Create adds a new user (error if the id exists).
+func (s *Store) Create(u User) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if strings.TrimSpace(u.ID) == "" {
+		return fmt.Errorf("id required")
+	}
+	if _, ok := s.byID[u.ID]; ok {
+		return fmt.Errorf("user %q already exists", u.ID)
+	}
+	if u.Tier == "" {
+		u.Tier = TierFree
+	}
+	if u.Role == "" {
+		u.Role = RoleUser
+	}
+	s.all = append(s.all, u)
+	s.byID[u.ID] = u
+	return s.save()
+}
+
+// mutate applies fn to the stored user and persists.
+func (s *Store) mutate(id string, fn func(*User)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.all {
+		if s.all[i].ID == id {
+			fn(&s.all[i])
+			s.byID[id] = s.all[i]
+			return s.save()
+		}
+	}
+	return fmt.Errorf("user %q not found", id)
+}
+
+// SetDisabled disables/enables a user.
+func (s *Store) SetDisabled(id string, d bool) error { return s.mutate(id, func(u *User) { u.Disabled = d }) }
+
+// SetTier changes a user's subscription tier.
+func (s *Store) SetTier(id string, t Tier) error { return s.mutate(id, func(u *User) { u.Tier = t }) }
+
+// SetRole changes a user's role.
+func (s *Store) SetRole(id string, r Role) error { return s.mutate(id, func(u *User) { u.Role = r }) }
+
+// SetPassword resets a user's password.
+func (s *Store) SetPassword(id, pw string) error { return s.mutate(id, func(u *User) { u.SetPassword(pw) }) }
+
+// Delete removes a user.
+func (s *Store) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.byID[id]; !ok {
+		return fmt.Errorf("user %q not found", id)
+	}
+	delete(s.byID, id)
+	out := s.all[:0]
+	for _, u := range s.all {
+		if u.ID != id {
+			out = append(out, u)
+		}
+	}
+	s.all = out
+	return s.save()
+}
+
+// save atomically rewrites the JSONL file. Caller holds the lock.
+func (s *Store) save() error {
+	tmp := s.path + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	w := bufio.NewWriter(f)
+	fmt.Fprintln(w, "# Users — one JSON per line. tier: free|pro · role: user|admin. Managed by the admin dashboard.")
+	enc := json.NewEncoder(w)
+	for _, u := range s.all {
+		if err := enc.Encode(u); err != nil {
+			f.Close()
+			return err
+		}
+	}
+	if err := w.Flush(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.path)
+}

@@ -19,7 +19,7 @@ cetus-marketdata-pipeline  ──(SQLite: adjusted_bars)──►  cetus-marketd
 |---------|--------------|
 | `scanner` / `scanner scan` | Per-symbol **JSONL signal stream** (volume / price / gap breakouts) on stdout |
 | `scanner digest` | **Daily post-close digest** — whole-universe snapshot → market breadth + preset studies (52-wk highs, golden cross, oversold bounce, momentum leaders), rendered `html` / `text` / `json` |
-| `scanner serve` | Live HTTP dashboard (cached, `?refresh=1` to force). **`/`** = user dashboard (breadth + the acting user's signal studies); **`/admin`** = operator console (ingestion coverage, warehouse, data-quality watch, users) — **admin-only, else 403** |
+| `scanner serve` | Live HTTP dashboard with **per-session login**. **`/login`** signs in (session cookie); **`/`** = user dashboard (breadth + the acting user's tier-accessible studies); **`/admin`** = operator console + **user CRUD** (create / tier / role / disable / delete), **admin-only**. Sign out switches users. Cached scan (`?refresh=1`) |
 | `scanner anomalies` | **Data-quality pass** (Sentinel Tier-0): flags extreme-move × thin-liquidity × price/200-DMA outliers as text/JSONL — the deterministic seam the future cross-source + LLM tiers extend |
 | `scanner studies` | Materializes the snapshot into the scanner's **own SQLite store** and runs a user's **tier-accessible SQL-`WHERE` studies** (`studies.jsonl`) — pre-DSL, SQL is the study language |
 | `scanner users` | List the seeded users (id · tier · role) from `users.jsonl` |
@@ -126,6 +126,7 @@ Env-only (stdlib, no flags framework yet).
 | `SCANNER_DIGEST_WORKERS` | `0` | Scan parallelism (0 = NumCPU) |
 | `SCANNER_SERVE_ADDR` | `:8080` | Dashboard listen address |
 | `SCANNER_SERVE_TTL_SECS` | `600` | Dashboard render cache TTL |
+| `SCANNER_SESSION_HOURS` | `8` | Login session lifetime |
 
 **Studies & the scanner's own store** (`studies`) — the store is **separate from
 the read-only cetus warehouse**:
@@ -151,7 +152,7 @@ internal/scan/        concurrent whole-universe snapshot (worker pool, BarLoader
 internal/sentinel/    data-quality Tier-0 flags (deterministic; AI tiers extend it)
 internal/snapshot/    scanner's OWN SQLite store; materialize snapshot + run SQL studies
 internal/study/       studies as data (SQL-WHERE, JSONL, owner + tier)
-internal/user/        User entity: tiers + roles + JSONL registry (admin/regular; monetization gate)
+internal/user/        User entity + file-backed Store: tiers, roles, sha256 login, CRUD
 internal/digest/      Digest assembly + html/text/json renderers
 internal/dashboard/   admin ops-console renderer (serve)
 internal/config/      env-first configuration (SCANNER_*, CETUS_DB)

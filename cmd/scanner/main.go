@@ -12,6 +12,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -31,6 +33,7 @@ import (
 	"cetus-marketdata-scanner/internal/digest"
 	"cetus-marketdata-scanner/internal/scan"
 	"cetus-marketdata-scanner/internal/scanner"
+	"cetus-marketdata-scanner/internal/screen"
 	"cetus-marketdata-scanner/internal/sentinel"
 	"cetus-marketdata-scanner/internal/snapshot"
 	"cetus-marketdata-scanner/internal/store"
@@ -38,6 +41,51 @@ import (
 	"cetus-marketdata-scanner/internal/telemetry"
 	"cetus-marketdata-scanner/internal/user"
 )
+
+// --- session store (in-memory; opaque random tokens) ---
+
+const sessionCookie = "cetus_session"
+
+type sessionStore struct {
+	mu sync.Mutex
+	m  map[string]sessionEntry
+}
+
+type sessionEntry struct {
+	uid string
+	exp time.Time
+}
+
+func newSessionStore() *sessionStore { return &sessionStore{m: map[string]sessionEntry{}} }
+
+func (s *sessionStore) create(uid string, ttl time.Duration) string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	tok := hex.EncodeToString(b)
+	s.mu.Lock()
+	s.m[tok] = sessionEntry{uid, time.Now().Add(ttl)}
+	s.mu.Unlock()
+	return tok
+}
+
+func (s *sessionStore) get(tok string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.m[tok]
+	if !ok || time.Now().After(e.exp) {
+		if ok {
+			delete(s.m, tok)
+		}
+		return "", false
+	}
+	return e.uid, true
+}
+
+func (s *sessionStore) delete(tok string) {
+	s.mu.Lock()
+	delete(s.m, tok)
+	s.mu.Unlock()
+}
 
 func main() {
 	log := telemetry.New(os.Stderr) // logs → stderr, output → stdout
@@ -391,8 +439,9 @@ func runStudies(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		"snapshot_rows", len(res.Rows), "store", cfg.StoreDB, "day", res.Day.Format("2006-01-02"))
 }
 
-// runServe serves the digest as a live HTML dashboard, recomputing at most once per
-// TTL (or on ?refresh=1). Listen address is SCANNER_SERVE_ADDR (default :8080).
+// runServe serves the login + user dashboard (/) + admin console (/admin) with
+// per-session auth. The expensive scan is shared/cached; each request renders the
+// logged-in user's tier-accessible studies. SCANNER_SERVE_ADDR sets the address.
 func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	st, err := store.OpenReadOnly(ctx, cfg.DBPath)
 	if err != nil {
@@ -401,71 +450,119 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	}
 	defer st.Close()
 
-	ttl := time.Duration(cfg.ServeTTLSecs) * time.Second
-	var mu sync.Mutex
-	var cached *dashboard.Model
-	var cachedAt time.Time
+	// The scanner's OWN store (never cetus) — kept open for the server's lifetime.
+	snap, err := snapshot.Open(cfg.StoreDB)
+	if err != nil {
+		log.Error("open snapshot store failed", "store", cfg.StoreDB, "error", err)
+		os.Exit(1)
+	}
+	defer snap.Close()
 
-	buildModel := func() (*dashboard.Model, error) {
+	users, err := user.OpenStore(cfg.UsersPath)
+	if err != nil {
+		log.Error("open users failed", "path", cfg.UsersPath, "error", err)
+		os.Exit(1)
+	}
+	sessions := newSessionStore()
+	sessTTL := time.Duration(cfg.SessionHours) * time.Hour
+	ttl := time.Duration(cfg.ServeTTLSecs) * time.Second
+
+	// Shared, user-independent scan cache (guarded by mu). Per-user studies run
+	// against the shared snapshot at render time.
+	var (
+		mu      sync.Mutex
+		cAt     time.Time
+		cRows   []screen.SnapshotRow
+		cStats  store.OpsStats
+		cFlags  []sentinel.Flag
+		cSus    int
+		cWat    int
+		cDay    time.Time
+		cMillis int64
+		cSize   int64
+	)
+	refresh := func() error { // caller holds mu
 		start := time.Now()
 		universe, err := resolveUniverse(ctx, st, cfg)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if cfg.MaxSymbols > 0 && len(universe) > cfg.MaxSymbols {
 			universe = universe[:cfg.MaxSymbols]
 		}
-		d, res, err := scanAndBuild(ctx, log, st, universe, cfg)
-		if err != nil {
-			return nil, err
+		since := time.Now().UTC().AddDate(0, 0, -cfg.DigestLookbackDays).Unix()
+		res := scan.Universe(ctx, st, universe, scan.Options{Since: since, MinDollarVol: 0, Workers: cfg.DigestWorkers}, log)
+		if err := snap.Load(res.Rows, res.Day.Unix()); err != nil {
+			return err
 		}
-		flags := sentinel.Tier0(res.Rows, sentinel.DefaultTier0())
-		suspect, watch := sentinel.Counts(flags)
-		stats, err := st.Stats(ctx)
-		if err != nil {
-			return nil, err
+		cRows, cDay = res.Rows, res.Day
+		cFlags = sentinel.Tier0(res.Rows, sentinel.DefaultTier0())
+		cSus, cWat = sentinel.Counts(cFlags)
+		if s2, e := st.Stats(ctx); e == nil {
+			cStats = s2
+		} else {
+			return e
 		}
-		var size int64
+		cSize = 0
 		if fi, e := os.Stat(cfg.DBPath); e == nil {
-			size = fi.Size()
+			cSize = fi.Size()
 		}
-		var users []user.User
-		if reg, e := user.LoadFile(cfg.UsersPath); e == nil {
-			users = reg.All()
+		cMillis = time.Since(start).Milliseconds()
+		cAt = time.Now()
+		log.Info("scan refreshed", "scanned", res.Scanned, "flagged", len(cFlags), "day", cDay.Format("2006-01-02"))
+		return nil
+	}
+
+	// modelFor builds a per-user model against the shared cache (refresh if stale).
+	modelFor := func(u user.User, force bool) (*dashboard.Model, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if cRows == nil || time.Since(cAt) >= ttl || force {
+			if err := refresh(); err != nil {
+				return nil, err
+			}
 		}
-		log.Info("dashboard rendered", "scanned", res.Scanned, "flagged", len(flags),
-			"day", res.Day.Format("2006-01-02"))
+		allStudies, err := study.LoadFile(cfg.StudiesPath)
+		if err != nil {
+			return nil, err
+		}
+		d, err := digest.FromStudies(cDay, cRows, snap, study.Accessible(allStudies, u))
+		if err != nil {
+			return nil, err
+		}
 		return &dashboard.Model{
-			Acting: actingUser(log, cfg), Stats: stats, DBSizeBytes: size,
-			ScanMillis: time.Since(start).Milliseconds(), Digest: d,
-			Flags: flags, Suspect: suspect, Watch: watch, Users: users,
+			Acting: u, Stats: cStats, DBSizeBytes: cSize, ScanMillis: cMillis,
+			Digest: d, Flags: cFlags, Suspect: cSus, Watch: cWat, Users: users.All(),
 		}, nil
 	}
 
-	// getModel returns a cached model, rebuilding when stale or ?refresh=1.
-	getModel := func(force bool) (*dashboard.Model, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		if cached == nil || time.Since(cachedAt) >= ttl || force {
-			m, err := buildModel()
-			if err != nil {
-				return nil, err
-			}
-			cached, cachedAt = m, time.Now()
+	sessionUser := func(r *http.Request) (user.User, bool) {
+		c, err := r.Cookie(sessionCookie)
+		if err != nil {
+			return user.User{}, false
 		}
-		return cached, nil
+		uid, ok := sessions.get(c.Value)
+		if !ok {
+			return user.User{}, false
+		}
+		return users.Find(uid)
 	}
 
-	writePage := func(w http.ResponseWriter, r *http.Request, adminOnly bool, render func(*dashboard.Model, io.Writer) error) {
-		m, err := getModel(r.URL.Query().Get("refresh") != "")
+	page := func(w http.ResponseWriter, r *http.Request, adminOnly bool, render func(*dashboard.Model, io.Writer) error) {
+		u, ok := sessionUser(r)
+		if !ok {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		if adminOnly && !u.IsAdmin() {
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprintf(w, "403 — admin only (you are %s / %s)\n", u.ID, u.Role)
+			return
+		}
+		m, err := modelFor(u, r.URL.Query().Get("refresh") != "")
 		if err != nil {
 			log.Error("render dashboard failed", "error", err)
 			http.Error(w, "scan failed", http.StatusInternalServerError)
-			return
-		}
-		if adminOnly && !m.Acting.IsAdmin() {
-			w.WriteHeader(http.StatusForbidden)
-			fmt.Fprintf(w, "403 — admin only (acting user %q is role %s)\n", m.Acting.ID, m.Acting.Role)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -476,15 +573,96 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
+
+	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			r.ParseForm()
+			u, ok := users.Find(r.FormValue("user"))
+			if !ok || !u.CheckPassword(r.FormValue("password")) {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.WriteHeader(http.StatusUnauthorized)
+				dashboard.Login{Error: "Invalid user or password (or the account is disabled).", Users: users.All()}.HTML(w)
+				return
+			}
+			tok := sessions.create(u.ID, sessTTL)
+			http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: tok, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: int(sessTTL.Seconds())})
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		dashboard.Login{Users: users.All()}.HTML(w)
+	})
+
+	mux.HandleFunc("/logout", func(w http.ResponseWriter, r *http.Request) {
+		if c, err := r.Cookie(sessionCookie); err == nil {
+			sessions.delete(c.Value)
+		}
+		http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1})
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+	})
+
+	// Admin user CRUD (admin-gated).
+	mux.HandleFunc("/admin/users", func(w http.ResponseWriter, r *http.Request) {
+		u, ok := sessionUser(r)
+		if !ok {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		if !u.IsAdmin() {
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprintln(w, "403 — admin only")
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Redirect(w, r, "/admin", http.StatusSeeOther)
+			return
+		}
+		r.ParseForm()
+		id := strings.TrimSpace(r.FormValue("id"))
+		var actErr error
+		switch r.FormValue("action") {
+		case "create":
+			nu := user.User{ID: id, Name: r.FormValue("name"), Tier: user.Tier(r.FormValue("tier")), Role: user.Role(r.FormValue("role"))}
+			nu.SetPassword(r.FormValue("password"))
+			actErr = users.Create(nu)
+		case "disable":
+			actErr = users.SetDisabled(id, true)
+		case "enable":
+			actErr = users.SetDisabled(id, false)
+		case "set-pro":
+			actErr = users.SetTier(id, user.TierPro)
+		case "set-free":
+			actErr = users.SetTier(id, user.TierFree)
+		case "set-admin":
+			actErr = users.SetRole(id, user.RoleAdmin)
+		case "set-user":
+			actErr = users.SetRole(id, user.RoleUser)
+		case "delete":
+			if id == u.ID {
+				actErr = fmt.Errorf("cannot delete yourself")
+			} else {
+				actErr = users.Delete(id)
+			}
+		default:
+			actErr = fmt.Errorf("unknown action")
+		}
+		if actErr != nil {
+			log.Warn("user admin action failed", "action", r.FormValue("action"), "id", id, "error", actErr)
+		} else {
+			log.Info("user admin action", "action", r.FormValue("action"), "id", id, "by", u.ID)
+		}
+		http.Redirect(w, r, "/admin", http.StatusSeeOther)
+	})
+
 	mux.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
-		writePage(w, r, true, func(m *dashboard.Model, out io.Writer) error { return m.AdminHTML(out) })
+		page(w, r, true, func(m *dashboard.Model, out io.Writer) error { return m.AdminHTML(out) })
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
 		}
-		writePage(w, r, false, func(m *dashboard.Model, out io.Writer) error { return m.IndexHTML(out) })
+		page(w, r, false, func(m *dashboard.Model, out io.Writer) error { return m.IndexHTML(out) })
 	})
 
 	// Bind first, so a port collision fails immediately with a clear error instead of

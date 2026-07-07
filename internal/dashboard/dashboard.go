@@ -36,6 +36,15 @@ func (m Model) IndexHTML(w io.Writer) error { return tmpl.ExecuteTemplate(w, "in
 // AdminHTML renders the admin ops console (route "/admin").
 func (m Model) AdminHTML(w io.Writer) error { return tmpl.ExecuteTemplate(w, "admin", m) }
 
+// Login is the sign-in page model.
+type Login struct {
+	Error string
+	Users []user.User
+}
+
+// HTML renders the sign-in page.
+func (l Login) HTML(w io.Writer) error { return tmpl.ExecuteTemplate(w, "login", l) }
+
 // --- template helpers ---
 
 func money(v float64) string {
@@ -133,4 +142,4 @@ var funcs = template.FuncMap{
 	},
 }
 
-var tmpl = template.Must(template.New("dash").Funcs(funcs).Parse(stylesSrc + indexSrc + adminSrc))
+var tmpl = template.Must(template.New("dash").Funcs(funcs).Parse(stylesSrc + indexSrc + adminSrc + loginSrc))

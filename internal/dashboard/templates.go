@@ -72,6 +72,11 @@ const stylesSrc = `{{define "styles"}}<style>
   .flag .name{font-family:var(--mono);font-weight:700} .flag .why{color:var(--muted);font-size:12.5px}
   .flag .metric{font-family:var(--mono);text-align:right}
   .note{color:var(--faint);font-size:11.5px;padding:10px 6px 2px;font-style:italic;text-align:center}
+  input,select{padding:7px 9px;border:1px solid var(--border);border-radius:7px;background:var(--panel2);color:var(--ink);font-size:13px;font-family:var(--sans)}
+  input:focus,select:focus{outline:2px solid var(--accent);outline-offset:1px}
+  .mini{font-size:11px;padding:3px 7px;border:1px solid var(--border);border-radius:6px;background:var(--panel2);color:var(--muted);cursor:pointer;font-family:var(--sans)}
+  .mini:hover{color:var(--ink);border-color:var(--accent)} .mini.danger:hover{color:var(--down);border-color:var(--down)}
+  .off{font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;background:var(--down-bg);color:var(--down)}
   @media (max-width:820px){.kpis{grid-template-columns:1fr 1fr}.grid{grid-template-columns:1fr}.strip{grid-template-columns:1fr 1fr}.meta{width:100%;margin-left:0}}
 </style>{{end}}`
 
@@ -90,6 +95,7 @@ const indexSrc = `{{define "index"}}<!doctype html>
     </div>
     {{if .Acting.IsAdmin}}<a class="btn" href="/admin">Admin →</a>{{end}}
     <button class="btn" id="tgl" aria-label="Toggle theme">◐ Theme</button>
+    <a class="btn" href="/logout">Sign out</a>
   </div>
 
   <div class="kpis">
@@ -131,6 +137,7 @@ const adminSrc = `{{define "admin"}}<!doctype html>
     </div>
     <a class="btn" href="/">← Dashboard</a>
     <button class="btn" id="tgl" aria-label="Toggle theme">◐ Theme</button>
+    <a class="btn" href="/logout">Sign out</a>
   </div>
 
   <div class="kpis">
@@ -172,10 +179,50 @@ const adminSrc = `{{define "admin"}}<!doctype html>
     <div class="panel full">
       <div class="ph"><span>👥</span><h2>Users</h2><span class="cnt">{{len .Users}}</span></div>
       <div class="pb"><table>
-        <thead><tr><th>ID</th><th>Name</th><th>Tier</th><th>Role</th></tr></thead>
-        <tbody>{{range .Users}}<tr><td class="sym">{{.ID}}</td><td>{{.Name}}</td><td>{{.Tier}}</td><td>{{.Role}}</td></tr>{{end}}</tbody>
-      </table></div>
+        <thead><tr><th>ID</th><th>Name</th><th>Tier</th><th>Role</th><th>Manage</th></tr></thead>
+        <tbody>{{range .Users}}<tr>
+          <td class="sym">{{.ID}}{{if .Disabled}} <span class="off">off</span>{{end}}</td>
+          <td>{{.Name}}</td><td>{{.Tier}}</td><td>{{.Role}}</td>
+          <td><form method="post" action="/admin/users" style="display:inline;white-space:nowrap">
+            <input type="hidden" name="id" value="{{.ID}}">
+            {{if .Disabled}}<button class="mini" name="action" value="enable">Enable</button>{{else}}<button class="mini" name="action" value="disable">Disable</button>{{end}}
+            <button class="mini" name="action" value="{{if eq .Tier "pro"}}set-free{{else}}set-pro{{end}}">{{if eq .Tier "pro"}}→free{{else}}→pro{{end}}</button>
+            <button class="mini" name="action" value="{{if .IsAdmin}}set-user{{else}}set-admin{{end}}">{{if .IsAdmin}}→user{{else}}→admin{{end}}</button>
+            <button class="mini danger" name="action" value="delete" onclick="return confirm('Delete {{.ID}}?')">del</button>
+          </form></td>
+        </tr>{{end}}</tbody>
+      </table>
+      <form method="post" action="/admin/users" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:12px 8px 6px;border-top:1px solid var(--border)">
+        <input type="hidden" name="action" value="create">
+        <input name="id" placeholder="id" style="width:90px" required>
+        <input name="name" placeholder="name" style="width:120px">
+        <input name="password" type="password" placeholder="password" style="width:120px">
+        <select name="tier"><option value="free">free</option><option value="pro">pro</option></select>
+        <select name="role"><option value="user">user</option><option value="admin">admin</option></select>
+        <button class="btn" type="submit">Create user</button>
+      </form></div>
     </div>
   </div>
   <p class="note">Admin · <span class="mono">scanner serve</span> · generated {{.Digest.GeneratedAt.Format "2006-01-02 15:04 UTC"}}</p>
 </div>` + themeScript + `</body></html>{{end}}`
+
+// loginSrc is the sign-in page.
+const loginSrc = `{{define "login"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cetus Scanner — Sign in</title>{{template "styles"}}</head>
+<body><div class="shell" style="max-width:380px">
+  <div class="panel" style="margin-top:12vh">
+    <div class="ph"><span>📡</span><h2>Cetus Scanner — Sign in</h2></div>
+    <div class="pb" style="padding:18px">
+      {{if .Error}}<div style="color:var(--down);font-size:13px;margin-bottom:12px">{{.Error}}</div>{{end}}
+      <form method="post" action="/login">
+        <label class="lbl">User</label><br>
+        <input name="user" autofocus autocomplete="username" style="width:100%;margin:5px 0 12px"><br>
+        <label class="lbl">Password</label><br>
+        <input name="password" type="password" autocomplete="current-password" style="width:100%;margin:5px 0 16px"><br>
+        <button class="btn" type="submit" style="width:100%;padding:9px">Sign in</button>
+      </form>
+      <div class="note" style="text-align:left;margin-top:14px">Users: {{range .Users}}<b>{{.ID}}</b> · {{end}}<span style="color:var(--faint)">(dev: password = id)</span></div>
+    </div>
+  </div>
+</div></body></html>{{end}}`
