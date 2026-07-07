@@ -120,3 +120,20 @@ func visibleTo(s Study, u user.User) bool {
 		return s.Owner == user.GlobalID
 	}
 }
+
+// ValidateClause rejects SQL fragments (WHERE / ORDER BY) with dangerous constructs,
+// for UNTRUSTED (non-admin) authors. A denylist over an already-narrow surface — a
+// read-only SELECT over the ephemeral, single-table, no-sensitive-data snapshot —
+// not a full parser. Admins bypass it.
+func ValidateClause(clause string) error {
+	if strings.Contains(clause, ";") {
+		return fmt.Errorf("';' is not allowed")
+	}
+	lower := strings.ToLower(clause)
+	for _, bad := range []string{"--", "/*", "*/", "attach", "pragma", "load_extension", "union", "select"} {
+		if strings.Contains(lower, bad) {
+			return fmt.Errorf("%q is not allowed here", bad)
+		}
+	}
+	return nil
+}

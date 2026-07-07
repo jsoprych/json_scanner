@@ -32,7 +32,9 @@ type Model struct {
 	Suspect     int
 	Watch       int
 	Users       []user.User
-	Studies     []study.Study // raw definitions for the admin study editor
+	Studies     []study.Study // all raw definitions (admin study editor)
+	MyStudies   []study.Study // the acting user's own studies (self-service editor)
+	StudyQuota  int           // max studies the acting user may own (0 = unlimited)
 }
 
 // IndexHTML renders the user-facing dashboard (route "/").

@@ -94,6 +94,15 @@ const (
 	authModeProxy = "proxy" // trust an identity header from a reverse proxy (caddy-security)
 )
 
+// studyQuota returns how many studies a user may own (0 = unlimited). Admins and
+// pro users are unlimited; free users are capped by config.
+func studyQuota(u user.User, cfg config.Config) int {
+	if u.IsAdmin() || u.Tier == user.TierPro {
+		return 0
+	}
+	return cfg.FreeStudyQuota
+}
+
 // atoiOr parses s as an int, returning def on failure.
 func atoiOr(s string, def int) int {
 	if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
@@ -607,11 +616,18 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		if err != nil {
 			return nil, err
 		}
+		var mine []study.Study
+		for _, s := range allStudies {
+			if s.Owner == u.ID {
+				mine = append(mine, s)
+			}
+		}
 		return &dashboard.Model{
 			Acting: u, SessionAuth: cfg.AuthMode == authModeLogin,
 			Stats: cStats, DBSizeBytes: cSize, ScanMillis: cMillis,
 			Digest: d, Flags: cFlags, Suspect: cSus, Watch: cWat,
-			Users: users.All(), Studies: allStudies,
+			Users: users.All(), Studies: allStudies, MyStudies: mine,
+			StudyQuota: studyQuota(u, cfg),
 		}, nil
 	}
 
@@ -800,24 +816,31 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		http.Redirect(w, r, "/admin", http.StatusSeeOther)
 	})
 
-	// Study editor: live WHERE preview (JSON).
-	mux.HandleFunc("/admin/studies/test", func(w http.ResponseWriter, r *http.Request) {
+	// Study editor preview: any logged-in user; non-admin clauses are sandbox-checked.
+	mux.HandleFunc("/studies/test", func(w http.ResponseWriter, r *http.Request) {
 		u, ok := requireUser(w, r)
 		if !ok {
 			return
 		}
-		if !u.IsAdmin() {
-			w.WriteHeader(http.StatusForbidden)
-			return
-		}
 		r.ParseForm()
-		matches, err := preview(study.Study{Where: r.FormValue("where"), OrderBy: r.FormValue("order_by"), Limit: atoiOr(r.FormValue("limit"), 20)})
+		where, orderBy := r.FormValue("where"), r.FormValue("order_by")
 		w.Header().Set("Content-Type", "application/json")
 		type resp struct {
 			Count  int      `json:"count"`
 			Sample []string `json:"sample"`
 			Error  string   `json:"error,omitempty"`
 		}
+		if !u.IsAdmin() {
+			if err := study.ValidateClause(where); err != nil {
+				json.NewEncoder(w).Encode(resp{Error: err.Error()})
+				return
+			}
+			if err := study.ValidateClause(orderBy); err != nil {
+				json.NewEncoder(w).Encode(resp{Error: err.Error()})
+				return
+			}
+		}
+		matches, err := preview(study.Study{Where: where, OrderBy: orderBy, Limit: atoiOr(r.FormValue("limit"), 20)})
 		if err != nil {
 			json.NewEncoder(w).Encode(resp{Error: err.Error()})
 			return
@@ -832,31 +855,82 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		json.NewEncoder(w).Encode(resp{Count: len(matches), Sample: sample})
 	})
 
-	// Study editor: save / delete.
-	mux.HandleFunc("/admin/studies", func(w http.ResponseWriter, r *http.Request) {
+	// Study editor save/delete. Admins manage any study; regular users manage their
+	// own only — owner forced to self, tier forced free, public reserved for admins,
+	// clauses sandboxed, and creation capped by the tier quota.
+	mux.HandleFunc("/studies", func(w http.ResponseWriter, r *http.Request) {
 		u, ok := requireUser(w, r)
 		if !ok {
 			return
 		}
-		if !u.IsAdmin() {
-			w.WriteHeader(http.StatusForbidden)
-			fmt.Fprintln(w, "403 — admin only")
-			return
-		}
 		if r.Method != http.MethodPost {
-			http.Redirect(w, r, "/admin", http.StatusSeeOther)
+			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
 		r.ParseForm()
+		back := "/"
+		if u.IsAdmin() {
+			back = "/admin"
+		}
+		key := strings.TrimSpace(r.FormValue("key"))
+		existing, exists := studyStore.Get(key)
+		if exists && !u.IsAdmin() && existing.Owner != u.ID {
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprintln(w, "403 — not your study")
+			return
+		}
 		switch r.FormValue("action") {
 		case "save":
 			st := study.Study{
-				Key: r.FormValue("key"), Title: r.FormValue("title"), Emoji: r.FormValue("emoji"),
+				Key: key, Title: r.FormValue("title"), Emoji: r.FormValue("emoji"),
 				Owner: r.FormValue("owner"), Visibility: study.Visibility(r.FormValue("visibility")),
 				Group: r.FormValue("group"), Tier: user.Tier(r.FormValue("tier")),
 				Where: r.FormValue("where"), OrderBy: r.FormValue("order_by"), Limit: atoiOr(r.FormValue("limit"), 0),
 			}
-			if strings.TrimSpace(st.Where) != "" { // reject a broken WHERE before persisting
+			if !u.IsAdmin() {
+				st.Owner = u.ID         // can't create for someone else
+				st.Tier = user.TierFree // tier is an admin/billing concern
+				switch st.Visibility {
+				case study.VisPublic:
+					w.WriteHeader(http.StatusForbidden)
+					fmt.Fprintln(w, "only admins can publish public studies")
+					return
+				case study.VisGroup:
+					if !u.InGroup(st.Group) {
+						w.WriteHeader(http.StatusBadRequest)
+						fmt.Fprintf(w, "you're not a member of group %q", st.Group)
+						return
+					}
+				default:
+					st.Visibility = study.VisPrivate
+				}
+				if err := study.ValidateClause(st.Where); err != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					fmt.Fprintf(w, "WHERE: %v", err)
+					return
+				}
+				if err := study.ValidateClause(st.OrderBy); err != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					fmt.Fprintf(w, "ORDER BY: %v", err)
+					return
+				}
+				if !exists { // quota: cap NEW studies by tier
+					if q := studyQuota(u, cfg); q > 0 {
+						owned := 0
+						for _, s := range studyStore.All() {
+							if s.Owner == u.ID {
+								owned++
+							}
+						}
+						if owned >= q {
+							w.WriteHeader(http.StatusPaymentRequired)
+							fmt.Fprintf(w, "study limit reached (%d) on the %s tier — upgrade for more", q, u.Tier)
+							return
+						}
+					}
+				}
+			}
+			if strings.TrimSpace(st.Where) != "" { // catch SQL errors before persisting
 				if _, perr := preview(study.Study{Where: st.Where, OrderBy: st.OrderBy, Limit: 1}); perr != nil {
 					w.WriteHeader(http.StatusBadRequest)
 					fmt.Fprintf(w, "invalid WHERE: %v", perr)
@@ -868,15 +942,15 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 				fmt.Fprintf(w, "cannot save study: %v", err)
 				return
 			}
-			log.Info("study saved", "key", st.Key, "by", u.ID)
+			log.Info("study saved", "key", st.Key, "by", u.ID, "admin", u.IsAdmin())
 		case "delete":
-			if err := studyStore.Delete(r.FormValue("key")); err != nil {
-				log.Warn("study delete failed", "key", r.FormValue("key"), "error", err)
+			if err := studyStore.Delete(key); err != nil {
+				log.Warn("study delete failed", "key", key, "error", err)
 			} else {
-				log.Info("study deleted", "key", r.FormValue("key"), "by", u.ID)
+				log.Info("study deleted", "key", key, "by", u.ID)
 			}
 		}
-		http.Redirect(w, r, "/admin", http.StatusSeeOther)
+		http.Redirect(w, r, back, http.StatusSeeOther)
 	})
 
 	mux.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {

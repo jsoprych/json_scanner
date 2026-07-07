@@ -120,7 +120,58 @@ const indexSrc = `{{define "index"}}<!doctype html>
     </div>
     {{end}}
   </div>
+
+  <div class="panel full" style="margin-top:16px">
+    <div class="ph"><span>🧪</span><h2>My Studies</h2><span class="cnt">{{len .MyStudies}}{{if gt .StudyQuota 0}} / {{.StudyQuota}}{{else}} / ∞{{end}}</span></div>
+    <div class="pb">
+      {{if .MyStudies}}<table>
+        <thead><tr><th>Key</th><th>Title</th><th>Vis</th><th>Group</th><th>WHERE</th><th></th></tr></thead>
+        <tbody>{{range .MyStudies}}<tr>
+          <td class="sym">{{.Key}}</td><td>{{.Emoji}} {{.Title}}</td><td>{{.Visibility}}</td><td>{{.Group}}</td>
+          <td class="mono" style="max-width:240px;overflow:hidden;text-overflow:ellipsis">{{.Where}}</td>
+          <td style="white-space:nowrap">
+            <button class="mini" type="button" onclick="editMine('{{.Key}}')">edit</button>
+            <form method="post" action="/studies" style="display:inline"><input type="hidden" name="action" value="delete"><input type="hidden" name="key" value="{{.Key}}"><button class="mini danger" onclick="return confirm('Delete {{.Key}}?')">del</button></form>
+          </td>
+        </tr>{{end}}</tbody>
+      </table>{{else}}<div class="none">— no studies yet —</div>{{end}}
+      <form method="post" action="/studies" id="myForm" style="border-top:1px solid var(--border);padding:12px 6px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+        <input type="hidden" name="action" value="save">
+        <input name="key" id="m_key" placeholder="key (unique)" required>
+        <input name="title" id="m_title" placeholder="title">
+        <input name="emoji" id="m_emoji" placeholder="emoji">
+        <select name="visibility" id="m_vis"><option value="private">private</option><option value="group">group (shared)</option></select>
+        <input name="group" id="m_group" placeholder="group (if group)">
+        <input name="order_by" id="m_order" placeholder="order_by  e.g. dollar_vol DESC" style="grid-column:span 2">
+        <input name="limit" id="m_limit" type="number" placeholder="limit">
+        <textarea name="where" id="m_where" placeholder="WHERE  e.g. close > sma200 AND rsi14 between 55 and 70" style="grid-column:1/-1;min-height:52px;font-family:var(--mono);padding:7px 9px;border:1px solid var(--border);border-radius:7px;background:var(--panel2);color:var(--ink)"></textarea>
+        <div style="grid-column:1/-1;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn" type="submit">Save</button>
+          <button class="btn" type="button" onclick="testMine()">Test WHERE</button>
+          <button class="btn" type="button" onclick="clearMine()">New</button>
+          <span id="m_result" class="mono" style="font-size:12px;color:var(--muted)"></span>
+          {{if and (gt .StudyQuota 0) (ge (len .MyStudies) .StudyQuota)}}<span class="warn" style="font-size:12px">Limit reached ({{.StudyQuota}}) — upgrade for more.</span>{{end}}
+        </div>
+      </form>
+    </div>
+  </div>
+
   <p class="note">Live · <span class="mono">scanner serve</span> · generated {{.Digest.GeneratedAt.Format "2006-01-02 15:04 UTC"}}</p>
+  <script>
+    var MINE = {{studiesJSON .MyStudies}};
+    function _g(x){return document.getElementById(x);}
+    function editMine(k){var s=MINE.find(function(x){return x.key===k;});if(!s)return;
+      _g('m_key').value=s.key;_g('m_title').value=s.title||'';_g('m_emoji').value=s.emoji||'';
+      _g('m_vis').value=(s.visibility==='group'?'group':'private');_g('m_group').value=s.group||'';
+      _g('m_limit').value=s.limit||'';_g('m_order').value=s.order_by||'';_g('m_where').value=s.where||'';
+      _g('m_result').textContent='editing '+s.key;_g('myForm').scrollIntoView();}
+    function clearMine(){_g('myForm').reset();_g('m_result').textContent='';}
+    function testMine(){var b=new URLSearchParams({where:_g('m_where').value,order_by:_g('m_order').value,limit:_g('m_limit').value||'20'});
+      _g('m_result').textContent='testing…';
+      fetch('/studies/test',{method:'POST',body:b}).then(function(r){return r.json();}).then(function(d){
+        _g('m_result').textContent=d.error?('✗ '+d.error):('✓ '+d.count+' match: '+((d.sample||[]).join(', ')||'—'));
+      }).catch(function(e){_g('m_result').textContent='✗ '+e;});}
+  </script>
 </div>` + themeScript + `</body></html>{{end}}`
 
 // adminSrc is the operator console: ingestion coverage, warehouse, data-quality
@@ -219,11 +270,11 @@ const adminSrc = `{{define "admin"}}<!doctype html>
             <td class="mono" style="max-width:240px;overflow:hidden;text-overflow:ellipsis">{{.Where}}</td>
             <td style="white-space:nowrap">
               <button class="mini" type="button" onclick="editStudy('{{.Key}}')">edit</button>
-              <form method="post" action="/admin/studies" style="display:inline"><input type="hidden" name="action" value="delete"><input type="hidden" name="key" value="{{.Key}}"><button class="mini danger" onclick="return confirm('Delete {{.Key}}?')">del</button></form>
+              <form method="post" action="/studies" style="display:inline"><input type="hidden" name="action" value="delete"><input type="hidden" name="key" value="{{.Key}}"><button class="mini danger" onclick="return confirm('Delete {{.Key}}?')">del</button></form>
             </td>
           </tr>{{end}}</tbody>
         </table>
-        <form method="post" action="/admin/studies" id="studyForm" style="border-top:1px solid var(--border);padding:12px 6px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+        <form method="post" action="/studies" id="studyForm" style="border-top:1px solid var(--border);padding:12px 6px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
           <input type="hidden" name="action" value="save">
           <input name="key" id="s_key" placeholder="key (unique)" required>
           <input name="title" id="s_title" placeholder="title">
@@ -257,7 +308,7 @@ const adminSrc = `{{define "admin"}}<!doctype html>
     function clearStudy(){_g('studyForm').reset();_g('s_result').textContent='';}
     function testStudy(){var b=new URLSearchParams({where:_g('s_where').value,order_by:_g('s_order').value,limit:_g('s_limit').value||'20'});
       _g('s_result').textContent='testing…';
-      fetch('/admin/studies/test',{method:'POST',body:b}).then(function(r){return r.json();}).then(function(d){
+      fetch('/studies/test',{method:'POST',body:b}).then(function(r){return r.json();}).then(function(d){
         _g('s_result').textContent=d.error?('✗ '+d.error):('✓ '+d.count+' match: '+((d.sample||[]).join(', ')||'—'));
       }).catch(function(e){_g('s_result').textContent='✗ '+e;});}
   </script>

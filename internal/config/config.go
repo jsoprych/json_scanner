@@ -80,6 +80,8 @@ type Config struct {
 	StudiesPath string
 	// StudiesFormat is the `studies` output: text (default) | jsonl.
 	StudiesFormat string
+	// FreeStudyQuota caps how many studies a free-tier user may own (pro = unlimited).
+	FreeStudyQuota int
 	// UsersPath is the JSONL user registry (id, tier, role).
 	UsersPath string
 	// User is the acting user id — resolved against UsersPath; tier/role gate access.
@@ -148,8 +150,9 @@ func Load() Config {
 		StoreDB:       envOr("SCANNER_STORE_DB", ":memory:"),
 		StudiesPath:   envOr("SCANNER_STUDIES_PATH", "studies.jsonl"),
 		StudiesFormat: envOr("SCANNER_STUDIES_FORMAT", "text"),
-		UsersPath:     envOr("SCANNER_USERS_PATH", "users.jsonl"),
-		User:          envOr("SCANNER_USER", "global"),
+		FreeStudyQuota: envInt("SCANNER_FREE_STUDY_QUOTA", 3),
+		UsersPath:      envOr("SCANNER_USERS_PATH", "users.jsonl"),
+		User:           envOr("SCANNER_USER", "global"),
 	}
 }
 

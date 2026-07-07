@@ -37,6 +37,13 @@ digest/dashboard render exactly that user's accessible studies. Example: `alice`
 (pro, group `desk-a`) sees the pro and desk-a studies; `bob` (free) sees only the
 free public ones.
 
+**Self-service studies.** Any user can author their own studies from `/` ("My
+Studies": write / **Test WHERE** live-preview / save), with guardrails: owner is
+forced to self, tier to free, `public` is admin-only (users get `private`/`group`),
+WHERE/ORDER-BY are sandbox-checked, and **creation is tier-capped** —
+`SCANNER_FREE_STUDY_QUOTA` (default 3) for free, unlimited for pro/admin. Admins
+author any study on `/admin`.
+
 Any mode scans the universe chosen by `SCANNER_UNIVERSE` (`all` · `exchange:NASDAQ`
 · `list:sp500` · `file:tickers.txt`).
 
