@@ -96,17 +96,11 @@ func (v *Verifier) Verify(token string) (string, error) {
 	if !ok {
 		return "", errors.New("malformed jwt")
 	}
-	hb, err := b64.DecodeString(p0)
+	alg, _, err := decodeHeader(p0)
 	if err != nil {
-		return "", fmt.Errorf("header b64: %w", err)
+		return "", err
 	}
-	var hdr struct {
-		Alg string `json:"alg"`
-	}
-	if err := json.Unmarshal(hb, &hdr); err != nil {
-		return "", fmt.Errorf("header json: %w", err)
-	}
-	h, err := v.hashForAlg(hdr.Alg) // rejects mismatched / "none"
+	h, err := v.hashForAlg(alg) // rejects mismatched / "none"
 	if err != nil {
 		return "", err
 	}
@@ -117,24 +111,67 @@ func (v *Verifier) Verify(token string) (string, error) {
 	if err := v.verifySig(h, []byte(p0+"."+p1), sig); err != nil {
 		return "", err
 	}
-
-	pb, err := b64.DecodeString(p1)
+	claims, err := decodeClaims(p1)
 	if err != nil {
-		return "", fmt.Errorf("payload b64: %w", err)
-	}
-	var claims map[string]any
-	if err := json.Unmarshal(pb, &claims); err != nil {
-		return "", fmt.Errorf("claims json: %w", err)
-	}
-	if err := v.checkTime(claims); err != nil {
 		return "", err
 	}
-	if err := v.checkIssAud(claims); err != nil {
-		return "", err
+	return checkClaims(claims, v.userClaim, v.issuer, v.audience, v.leeway)
+}
+
+// decodeHeader returns the alg and kid from a JWT header segment.
+func decodeHeader(part string) (alg, kid string, err error) {
+	hb, err := b64.DecodeString(part)
+	if err != nil {
+		return "", "", fmt.Errorf("header b64: %w", err)
 	}
-	id, _ := claims[v.userClaim].(string)
+	var h struct {
+		Alg string `json:"alg"`
+		Kid string `json:"kid"`
+	}
+	if err := json.Unmarshal(hb, &h); err != nil {
+		return "", "", fmt.Errorf("header json: %w", err)
+	}
+	return h.Alg, h.Kid, nil
+}
+
+// decodeClaims decodes a JWT payload segment.
+func decodeClaims(part string) (map[string]any, error) {
+	pb, err := b64.DecodeString(part)
+	if err != nil {
+		return nil, fmt.Errorf("payload b64: %w", err)
+	}
+	var c map[string]any
+	if err := json.Unmarshal(pb, &c); err != nil {
+		return nil, fmt.Errorf("claims json: %w", err)
+	}
+	return c, nil
+}
+
+// checkClaims validates exp/nbf/iss/aud and returns the identity claim. Shared by
+// all verifiers.
+func checkClaims(claims map[string]any, userClaim, issuer, audience string, leeway time.Duration) (string, error) {
+	now := time.Now()
+	exp, ok := numClaim(claims, "exp")
+	if !ok {
+		return "", errors.New("missing exp claim")
+	}
+	if now.After(time.Unix(exp, 0).Add(leeway)) {
+		return "", errors.New("token expired")
+	}
+	if nbf, ok := numClaim(claims, "nbf"); ok && now.Add(leeway).Before(time.Unix(nbf, 0)) {
+		return "", errors.New("token not yet valid")
+	}
+	if issuer != "" {
+		if iss, _ := claims["iss"].(string); iss != issuer {
+			return "", errors.New("issuer mismatch")
+		}
+	}
+	if audience != "" && !audMatch(claims["aud"], audience) {
+		return "", errors.New("audience mismatch")
+	}
+	id, _ := claims[userClaim].(string)
 	if id == "" {
-		return "", fmt.Errorf("identity claim %q missing or empty", v.userClaim)
+		return "", fmt.Errorf("identity claim %q missing or empty", userClaim)
 	}
 	return id, nil
 }
@@ -210,35 +247,6 @@ func (v *Verifier) verifySig(h crypto.Hash, signingInput, sig []byte) error {
 		return nil
 	}
 	return errors.New("no verification key configured")
-}
-
-func (v *Verifier) checkTime(claims map[string]any) error {
-	now := time.Now()
-	exp, ok := numClaim(claims, "exp")
-	if !ok {
-		return errors.New("missing exp claim")
-	}
-	if now.After(time.Unix(exp, 0).Add(v.leeway)) {
-		return errors.New("token expired")
-	}
-	if nbf, ok := numClaim(claims, "nbf"); ok {
-		if now.Add(v.leeway).Before(time.Unix(nbf, 0)) {
-			return errors.New("token not yet valid")
-		}
-	}
-	return nil
-}
-
-func (v *Verifier) checkIssAud(claims map[string]any) error {
-	if v.issuer != "" {
-		if iss, _ := claims["iss"].(string); iss != v.issuer {
-			return errors.New("issuer mismatch")
-		}
-	}
-	if v.audience != "" && !audMatch(claims["aud"], v.audience) {
-		return errors.New("audience mismatch")
-	}
-	return nil
 }
 
 func audMatch(aud any, want string) bool {

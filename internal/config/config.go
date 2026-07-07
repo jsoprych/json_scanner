@@ -60,6 +60,7 @@ type Config struct {
 	// JWT verification for proxy mode. When a key is set (HMAC secret or RSA pubkey
 	// file), the identity is taken from a verified token instead of a raw header.
 	JWTHeader     string // header carrying the token (Bearer prefix stripped)
+	JWTJWKSURL    string // JWKS endpoint (rotating RSA keys, e.g. Cloudflare Access)
 	JWTHMACSecret string // HS256/384/512 shared secret
 	JWTPubKeyFile string // RS256/384/512 RSA public key (PEM)
 	JWTUserClaim  string // claim holding the user id (default "sub")
@@ -132,6 +133,7 @@ func Load() Config {
 		AuthMode:          envOr("SCANNER_AUTH_MODE", "login"),
 		TrustedUserHeader: envOr("SCANNER_TRUSTED_USER_HEADER", "X-Token-User"),
 		JWTHeader:         envOr("SCANNER_JWT_HEADER", "Authorization"),
+		JWTJWKSURL:        envOr("SCANNER_JWT_JWKS_URL", ""),
 		JWTHMACSecret:     envOr("SCANNER_JWT_HMAC_SECRET", ""),
 		JWTPubKeyFile:     envOr("SCANNER_JWT_PUBKEY_FILE", ""),
 		JWTUserClaim:      envOr("SCANNER_JWT_USER_CLAIM", "sub"),

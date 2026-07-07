@@ -30,3 +30,6 @@ go.work.sum
 # Claude Code — local settings / transient temp files
 .claude/settings.local.json
 .claude/*.tmp.*
+
+# but keep the committed template
+!.env.example

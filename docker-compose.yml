@@ -1,0 +1,41 @@
+# Scanner behind a Cloudflare tunnel, authenticated by Cloudflare Access.
+#
+# The scanner is NEVER published to the host — only cloudflared reaches it over the
+# internal compose network. Cloudflare Access authenticates (SSO/MFA) at the edge and
+# injects a signed JWT (Cf-Access-Jwt-Assertion); the scanner runs in proxy mode and
+# verifies it against Access's rotating JWKS. See docs/DEPLOY-cloudflare.md.
+#
+# Copy .env.example → .env and fill in the values first.
+
+services:
+  scanner:
+    build: .
+    environment:
+      CETUS_DB: /data/cetus.db
+      SCANNER_SERVE_ADDR: ":8080"
+      # --- Cloudflare Access (recommended for public exposure) ---
+      SCANNER_AUTH_MODE: proxy
+      SCANNER_JWT_HEADER: Cf-Access-Jwt-Assertion
+      SCANNER_JWT_USER_CLAIM: email
+      SCANNER_JWT_JWKS_URL: "https://${CF_TEAM}.cloudflareaccess.com/cdn-cgi/access/certs"
+      SCANNER_JWT_ISSUER: "https://${CF_TEAM}.cloudflareaccess.com"
+      SCANNER_JWT_AUDIENCE: "${CF_ACCESS_AUD}"
+      # --- alternative: built-in login instead of Access ---
+      #   comment the four SCANNER_JWT_* + SCANNER_AUTH_MODE lines above and set:
+      # SCANNER_AUTH_MODE: login   # (then CHANGE the dev passwords in users.jsonl!)
+    volumes:
+      - "${CETUS_DB_PATH}:/data/cetus.db:ro"      # warehouse, read-only
+      - "./users.jsonl:/app/users.jsonl"          # writable: admin CRUD persists tier/role here
+      - "./studies.jsonl:/app/studies.jsonl:ro"
+    expose:
+      - "8080"                                     # internal only — not a host port
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: "${CF_TUNNEL_TOKEN}"
+    depends_on:
+      - scanner
+    restart: unless-stopped

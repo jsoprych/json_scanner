@@ -501,9 +501,14 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		os.Exit(2)
 	}
 	// Optional JWT verification for proxy mode (verified token beats a raw header).
-	var jwtVer *authjwt.Verifier
+	var jwtVer interface {
+		Verify(string) (string, error)
+	}
 	if cfg.AuthMode == authModeProxy {
 		switch {
+		case cfg.JWTJWKSURL != "":
+			jwtVer = authjwt.NewJWKS(cfg.JWTJWKSURL, cfg.JWTUserClaim, cfg.JWTIssuer, cfg.JWTAudience)
+			log.Info("proxy auth: JWT JWKS verification enabled (rotating RSA keys)", "jwks", cfg.JWTJWKSURL, "header", cfg.JWTHeader, "claim", cfg.JWTUserClaim)
 		case cfg.JWTHMACSecret != "":
 			jwtVer = authjwt.NewHMAC([]byte(cfg.JWTHMACSecret), cfg.JWTUserClaim, cfg.JWTIssuer, cfg.JWTAudience)
 			log.Info("proxy auth: JWT HMAC verification enabled", "header", cfg.JWTHeader, "claim", cfg.JWTUserClaim)
