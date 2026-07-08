@@ -70,6 +70,13 @@ as a fraction** of consolidated (prefer price-based signals for now).
 Requires Go 1.25+ and a cetus warehouse DB (the pipeline's `cetus.db`).
 
 ```bash
+# Easiest: run.sh builds the binary if it's missing, sources ./.env, then runs.
+./run.sh                 # serve the dashboard → http://localhost:8080
+./run.sh digest          # or: studies | anomalies | scan | users
+./run.sh build           # force a rebuild
+# Put local config in .env (git-ignored; see .env.example) — e.g. CETUS_DB=/…/cetus.db
+
+# Or drive the binary directly:
 make build
 
 # 1) JSONL signal stream (stdout = signals, stderr = logs):
