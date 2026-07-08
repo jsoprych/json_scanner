@@ -126,7 +126,7 @@ Env-only (stdlib, no flags framework yet).
 | `SCANNER_VOLUME_MULT` | `2.0` | Volume-breakout threshold (× trailing avg) |
 | `SCANNER_GAP_PCT` | `0.05` | Gap threshold (fraction vs prior close) |
 | `SCANNER_MAX_SYMBOLS` | `0` | Cap the scanned universe (0 = no cap) |
-| `SCANNER_UNIVERSE` | `all` | Scope: `all` \| `exchange:X` \| `list:NAME` \| `file:PATH` |
+| `SCANNER_UNIVERSE` | `index:r3000` | Scope: `all` \| `common` \| `index:CODE` (r3000/sp500/…) \| `exchange:X` \| `file:PATH`. An unseeded index falls back to `common` |
 | `SCANNER_ANOMALY_FORMAT` | `text` | `anomalies` output: `text` \| `jsonl` |
 
 **Digest & dashboard** (`digest` / `serve`):

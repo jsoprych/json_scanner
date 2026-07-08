@@ -206,7 +206,7 @@ func openUniverse(ctx context.Context, log *slog.Logger, cfg config.Config) (*st
 		log.Error("open warehouse failed", "db", cfg.DBPath, "error", err)
 		os.Exit(1)
 	}
-	universe, err := resolveUniverse(ctx, st, cfg)
+	universe, err := resolveUniverse(ctx, log, st, cfg)
 	if err != nil {
 		log.Error("resolve universe failed", "spec", cfg.Universe, "error", err)
 		st.Close()
@@ -215,29 +215,45 @@ func openUniverse(ctx context.Context, log *slog.Logger, cfg config.Config) (*st
 	if cfg.MaxSymbols > 0 && len(universe) > cfg.MaxSymbols {
 		universe = universe[:cfg.MaxSymbols]
 	}
-	log.Info("universe resolved", "spec", cfg.Universe, "symbols", len(universe))
+	log.Info("universe resolved", "spec", cfg.Universe, "symbols", len(universe), "bars", st.BarsTable())
 	return st, universe
 }
 
 // resolveUniverse turns the SCANNER_UNIVERSE spec into a symbol list:
 //
-//	all              → every SUCCESS symbol (default)
-//	exchange:NASDAQ  → SUCCESS symbols on that listing venue
-//	list:sp500       → SUCCESS members of a symbol_lists watchlist
+//	all              → every SUCCESS symbol
+//	common           → SUCCESS common stock (drops warrants/units/rights/ETFs)
+//	index:r3000      → SUCCESS common-stock members of an index (index_membership)
+//	exchange:NASDAQ  → SUCCESS common stock on that listing venue
 //	file:PATH        → SUCCESS symbols intersected with a tickers file (1/line, # comments)
-func resolveUniverse(ctx context.Context, st *store.Store, cfg config.Config) ([]string, error) {
+//	list:CODE        → alias of index:CODE (back-compat)
+//
+// An index scope that resolves to 0 (index not yet seeded) falls back to `common`,
+// so the default `index:r3000` works today and auto-scopes once the pipeline seeds.
+func resolveUniverse(ctx context.Context, log *slog.Logger, st *store.Store, cfg config.Config) ([]string, error) {
 	spec := strings.TrimSpace(cfg.Universe)
 	switch {
 	case spec == "" || spec == "all":
 		return st.Universe(ctx)
+	case spec == "common":
+		return st.UniverseCommon(ctx)
 	case strings.HasPrefix(spec, "exchange:"):
 		return st.UniverseExchange(ctx, strings.TrimPrefix(spec, "exchange:"))
-	case strings.HasPrefix(spec, "list:"):
-		return st.UniverseList(ctx, strings.TrimPrefix(spec, "list:"))
+	case strings.HasPrefix(spec, "index:"), strings.HasPrefix(spec, "list:"):
+		code := strings.TrimPrefix(strings.TrimPrefix(spec, "index:"), "list:")
+		syms, err := st.UniverseIndex(ctx, code)
+		if err != nil {
+			return nil, err
+		}
+		if len(syms) == 0 {
+			log.Warn("index not seeded — falling back to common stock", "index", code)
+			return st.UniverseCommon(ctx)
+		}
+		return syms, nil
 	case strings.HasPrefix(spec, "file:"):
 		return universeFromFile(ctx, st, strings.TrimPrefix(spec, "file:"))
 	default:
-		return nil, fmt.Errorf("bad SCANNER_UNIVERSE %q (want all|exchange:X|list:Y|file:PATH)", spec)
+		return nil, fmt.Errorf("bad SCANNER_UNIVERSE %q (want all|common|index:X|exchange:X|file:PATH)", spec)
 	}
 }
 
@@ -572,7 +588,7 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	)
 	refresh := func() error { // caller holds mu
 		start := time.Now()
-		universe, err := resolveUniverse(ctx, st, cfg)
+		universe, err := resolveUniverse(ctx, log, st, cfg)
 		if err != nil {
 			return err
 		}

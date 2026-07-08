@@ -19,7 +19,7 @@ EOD bars; this project **reads that database (read-only) and detects
 breakout/anomaly signals**. It writes nothing back to the warehouse.
 
 ```
-cetus-marketdata-pipeline  ──(SQLite: adjusted_bars)──►  cetus-marketdata-scanner
+cetus-marketdata-pipeline  ──(SQLite: published_bars)──►  cetus-marketdata-scanner
         (ingestion, upstream)                                (scan, this repo)
 ```
 
@@ -31,17 +31,27 @@ it — read the data dictionary:**
 - **Local (siblings on disk):** [`../cetus-marketdata-pipeline/docs/DATA_DICTIONARY.md`](../cetus-marketdata-pipeline/docs/DATA_DICTIONARY.md)
 - **GitHub (private):** https://github.com/jsoprych/cetus-marketdata-pipeline → `docs/DATA_DICTIONARY.md`
 
+Also see the consumer quickstart:
+[`../cetus-marketdata-pipeline/docs/DOWNSTREAM.md`](../cetus-marketdata-pipeline/docs/DOWNSTREAM.md).
+
 Non-negotiables from that contract:
 - **Open the DB read-only** (`file:cetus.db?mode=ro`). WAL lets us read while an
   ingestion run is in progress; never open read-write.
-- **Read the `adjusted_bars` view** for split-adjusted OHLCV — never do split math
-  client-side, and never read `adjustment_index` directly (missing row = factor 1.0).
+- **Read the best clean surface** — `published_bars` (materialized, split-adjusted,
+  quarantine-free), else the `clean_bars` view, else `adjusted_bars`. `store` picks
+  this automatically (`barsPreference`). Never do split or quality math client-side.
+- **Scope with `index_membership` + `security_type`** — default to the Russell 3000
+  common stock (`index:r3000`); an unseeded index falls back to `common`
+  (`security_type='common'` drops warrants/units/rights/ETFs). This is scope-at-read
+  (cetus ingests the full universe).
 - **Timestamps are Unix SECONDS** (UTC), except `logs.ts` (nanoseconds).
 - **`volume` is feed-limited** — on the free IEX feed it's a single-digit-% fraction
   of consolidated volume. Prices are trustworthy; volume is not (yet). Any
   `price × volume` metric is split-invariant and fine.
-- **Universe = symbols with data.** Scan `symbol_pipeline_state.status = 'SUCCESS'`;
-  `EMPTY` = no data on this feed (skip), `FAILED` = a real upstream error.
+- **"Has data" = `symbol_pipeline_state.status='SUCCESS'`** (combined with the scope
+  above); `EMPTY` = no data on this feed (skip), `FAILED` = a real upstream error.
+- **Alpaca symbol naming is canonical** — pass symbols through as stored; translate
+  only at an external boundary (e.g. Yahoo dot→dash), which the scanner doesn't cross.
 
 ## Architecture
 

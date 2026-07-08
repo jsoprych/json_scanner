@@ -119,7 +119,9 @@ func Load() Config {
 		VolumeMult: envFloat("SCANNER_VOLUME_MULT", 2.0),
 		GapPct:     envFloat("SCANNER_GAP_PCT", 0.05),
 		MaxSymbols: envInt("SCANNER_MAX_SYMBOLS", 0),
-		Universe:   envOr("SCANNER_UNIVERSE", "all"),
+		// Downstream default is the Russell 3000 (the liquid, data-solid ~21% slice);
+		// falls back to `common` until the pipeline seeds index_membership.
+		Universe: envOr("SCANNER_UNIVERSE", "index:r3000"),
 
 		DigestLookbackDays: envInt("SCANNER_DIGEST_LOOKBACK_DAYS", 400),
 		MinDollarVol:       envFloat("SCANNER_MIN_DOLLAR_VOL", 1e6),

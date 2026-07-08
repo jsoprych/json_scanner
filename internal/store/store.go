@@ -19,8 +19,15 @@ import (
 
 // Store wraps a read-only handle to the cetus warehouse.
 type Store struct {
-	db *sql.DB
+	db   *sql.DB
+	bars string // the bars read surface in use (published_bars|clean_bars|adjusted_bars)
 }
+
+// barsPreference is the read surface in order of preference: the materialized,
+// quarantine-free published_bars (the producer's hot path); else the live clean_bars
+// view (quarantine-free, but recomputed); else adjusted_bars (keeps quarantined bars).
+// Per docs/DOWNSTREAM.md — prefer published_bars, never filter/adjust client-side.
+var barsPreference = []string{"published_bars", "clean_bars", "adjusted_bars"}
 
 // OpenReadOnly opens the warehouse read-only. WAL permits concurrent reads
 // alongside the pipeline's single writer; we never write or run DDL.
@@ -41,11 +48,24 @@ func OpenReadOnly(ctx context.Context, path string) (*Store, error) {
 	}
 	db.SetMaxOpenConns(conns)
 	db.SetMaxIdleConns(conns)
-	return &Store{db: db}, nil
+
+	s := &Store{db: db, bars: "adjusted_bars"}
+	for _, t := range barsPreference {
+		var n int
+		if err := db.QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM sqlite_master WHERE name=? AND type IN ('table','view')", t).Scan(&n); err == nil && n > 0 {
+			s.bars = t
+			break
+		}
+	}
+	return s, nil
 }
 
 // Close releases the handle.
 func (s *Store) Close() error { return s.db.Close() }
+
+// BarsTable reports which read surface the store resolved to.
+func (s *Store) BarsTable() string { return s.bars }
 
 // Universe returns the symbols with successfully-ingested data (ascending), per
 // symbol_pipeline_state. EMPTY/FAILED symbols are excluded — EMPTY has no data on
@@ -61,14 +81,13 @@ func (s *Store) Universe(ctx context.Context) ([]string, error) {
 	return collectSymbols(rows)
 }
 
-// UniverseExchange returns SUCCESS symbols listed on the given exchange
-// (e.g. 'NASDAQ', 'NYSE'), ascending. This is listing venue — for a curated index
-// like the S&P 500 use UniverseList against symbol_lists instead.
+// UniverseExchange returns SUCCESS common-stock symbols on the given exchange
+// (e.g. 'NASDAQ', 'NYSE') — listing venue, not an index.
 func (s *Store) UniverseExchange(ctx context.Context, exchange string) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT p.symbol FROM symbol_pipeline_state p
 JOIN symbols s ON s.symbol = p.symbol
-WHERE p.status='SUCCESS' AND s.exchange = ?
+WHERE p.status='SUCCESS' AND s.exchange = ? AND s.security_type='common'
 ORDER BY p.symbol`, exchange)
 	if err != nil {
 		return nil, fmt.Errorf("load universe (exchange %q): %w", exchange, err)
@@ -77,17 +96,32 @@ ORDER BY p.symbol`, exchange)
 	return collectSymbols(rows)
 }
 
-// UniverseList returns SUCCESS symbols that belong to the named symbol_lists
-// watchlist (e.g. 'sp500', 'nasdaq100'), ascending. Empty result = the list is not
-// populated (the pipeline owns writing symbol_lists).
-func (s *Store) UniverseList(ctx context.Context, listName string) ([]string, error) {
+// UniverseIndex returns SUCCESS common-stock CURRENT members of an index
+// (e.g. 'r3000', 'sp500') per index_membership. Empty result = the index isn't
+// seeded yet (the pipeline owns index_membership) — callers may fall back.
+func (s *Store) UniverseIndex(ctx context.Context, code string) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT p.symbol FROM symbol_pipeline_state p
-JOIN symbol_lists l ON l.symbol = p.symbol
-WHERE p.status='SUCCESS' AND l.list_name = ?
-ORDER BY p.symbol`, listName)
+JOIN index_membership m ON m.symbol = p.symbol AND m.index_code = ? AND m.removed IS NULL
+JOIN symbols s ON s.symbol = p.symbol AND s.security_type='common'
+WHERE p.status='SUCCESS' ORDER BY p.symbol`, code)
 	if err != nil {
-		return nil, fmt.Errorf("load universe (list %q): %w", listName, err)
+		return nil, fmt.Errorf("load universe (index %q): %w", code, err)
+	}
+	defer rows.Close()
+	return collectSymbols(rows)
+}
+
+// UniverseCommon returns all SUCCESS common-stock symbols (drops warrants/units/
+// rights/ETFs via security_type). The safe fallback when no index is seeded.
+func (s *Store) UniverseCommon(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT p.symbol FROM symbol_pipeline_state p
+JOIN symbols s ON s.symbol = p.symbol
+WHERE p.status='SUCCESS' AND s.security_type='common'
+ORDER BY p.symbol`)
+	if err != nil {
+		return nil, fmt.Errorf("load universe (common): %w", err)
 	}
 	defer rows.Close()
 	return collectSymbols(rows)
@@ -169,17 +203,18 @@ func (s *Store) Stats(ctx context.Context) (OpsStats, error) {
 	return out, nil
 }
 
-// LoadAdjustedBars returns split-adjusted daily bars for symbol with
-// timestamp >= since, ascending, straight from the adjusted_bars view (no
-// client-side split math).
+// LoadAdjustedBars returns best-corrected, split-adjusted, quality-gated daily bars
+// for symbol with timestamp >= since, ascending, from the resolved read surface
+// (published_bars → clean_bars → adjusted_bars). No client-side split or quality math.
 func (s *Store) LoadAdjustedBars(ctx context.Context, symbol string, since int64) ([]model.Bar, error) {
+	// s.bars is chosen from a fixed allow-list (never user input) — safe to inline.
 	rows, err := s.db.QueryContext(ctx, `
 SELECT symbol, timestamp, open, high, low, close, volume, COALESCE(vwap, 0), source
-FROM adjusted_bars
+FROM `+s.bars+`
 WHERE symbol = ? AND timestamp >= ?
 ORDER BY timestamp ASC`, symbol, since)
 	if err != nil {
-		return nil, fmt.Errorf("load adjusted bars %s: %w", symbol, err)
+		return nil, fmt.Errorf("load bars %s from %s: %w", symbol, s.bars, err)
 	}
 	defer rows.Close()
 
