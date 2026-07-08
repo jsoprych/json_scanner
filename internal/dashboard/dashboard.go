@@ -141,6 +141,15 @@ var funcs = template.FuncMap{
 		b, _ := json.Marshal(ss)
 		return template.JS(b)
 	},
+	"firstLetter": func(s string) string {
+		if s == "" {
+			return "?"
+		}
+		return strings.ToUpper(s[:1])
+	},
+	// hdr wraps the model + active-page name so the shared header can highlight nav
+	// without mutating the (cached, shared) model.
+	"hdr": func(m Model, page string) map[string]any { return map[string]any{"M": m, "Page": page} },
 	"gt0":   func(v float64) bool { return v > 0.05 },
 	"lt0":   func(v float64) bool { return v < -0.05 },
 	"upper": func(s sentinel.Severity) string {
@@ -154,4 +163,4 @@ var funcs = template.FuncMap{
 	},
 }
 
-var tmpl = template.Must(template.New("dash").Funcs(funcs).Parse(stylesSrc + indexSrc + adminSrc + loginSrc))
+var tmpl = template.Must(template.New("dash").Funcs(funcs).Parse(stylesSrc + headerSrc + indexSrc + adminSrc + loginSrc))

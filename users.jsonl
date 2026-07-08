@@ -2,4 +2,4 @@
 {"id":"admin","name":"Admin","tier":"pro","role":"admin","pass_hash":"pbkdf2_sha256$600000$FAA8XhHa8fGlhl3J2VNeRw$57c0umJj9eWhin+AB6whR3UP9jJghjvnnAnJt+zaJcY"}
 {"id":"alice","name":"Alice","tier":"pro","role":"user","groups":["desk-a"],"pass_hash":"pbkdf2_sha256$600000$Y03IjrKG2ElY27eI0KGi/A$TtlO9eUSJp3sQiHcMHhi6DKQBrHF28L3RCLNtgX1PI4"}
 {"id":"bob","name":"Bob","tier":"free","role":"user","pass_hash":"pbkdf2_sha256$600000$jP7CvDunohm5qE4OtXHoOA$vVItmRbKM2nIO31ec1vMNsdaMFJKpmumJ76DSObAAJA"}
-{"id":"pat","name":"Pat","tier":"free","role":"user","groups":["user"],"pass_hash":"pbkdf2_sha256$600000$CKHHt8/1yCM4rHsFbSL2AA$tRMTmGHQRyM7h9jiT4AsRfxy7j7bGPsbW7Z1NlEvFkM"}
+{"id":"pat","name":"Pat","tier":"free","role":"user","pass_hash":"pbkdf2_sha256$600000$2HCfsphKuwGxvFuB2S4diw$eg1z0sUU/KOcG5kylohyXUYhNzLppi7vu5xPx/0iPAI"}

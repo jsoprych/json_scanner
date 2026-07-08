@@ -743,6 +743,20 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
 
+	// Public PWA assets (no auth) — make the dashboard installable / standalone.
+	mux.HandleFunc("/manifest.webmanifest", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/manifest+json")
+		io.WriteString(w, dashboard.Manifest)
+	})
+	mux.HandleFunc("/icon.svg", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		io.WriteString(w, dashboard.IconSVG)
+	})
+	mux.HandleFunc("/sw.js", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/javascript")
+		io.WriteString(w, dashboard.ServiceWorker)
+	})
+
 	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
 		if cfg.AuthMode == authModeProxy { // the proxy owns auth
 			http.Redirect(w, r, "/", http.StatusSeeOther)
