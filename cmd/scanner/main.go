@@ -33,6 +33,7 @@ import (
 	"cetus-marketdata-scanner/internal/config"
 	"cetus-marketdata-scanner/internal/dashboard"
 	"cetus-marketdata-scanner/internal/digest"
+	"cetus-marketdata-scanner/internal/predicate"
 	"cetus-marketdata-scanner/internal/scan"
 	"cetus-marketdata-scanner/internal/scanner"
 	"cetus-marketdata-scanner/internal/screen"
@@ -883,6 +884,82 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 			sample = append(sample, m.Symbol)
 		}
 		json.NewEncoder(w).Encode(resp{Count: len(matches), Sample: sample})
+	})
+
+	// Structured study editor (docs/ELKO_SCANNER_STUDY_EDITOR_MVP_DESIGN.md): the
+	// browser gets a harmless catalog of labels + legal combinations and only ever
+	// sends opaque IDs. The catalog is static, so marshal it once.
+	catalogBytes, _ := json.Marshal(predicate.BuildCatalog())
+	mux.HandleFunc("/api/scanner/catalog", func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := requireUser(w, r); !ok {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(catalogBytes)
+	})
+
+	// resultLimit is server-owned (never client-supplied): free tier shows 25 with a
+	// +1 probe for has_more; pro sees more.
+	resultLimit := func(u user.User) int {
+		if u.Tier == user.TierPro || u.IsAdmin() {
+			return 101
+		}
+		return 26
+	}
+
+	// Compile a structured Definition → deterministic SQL and run it as a live
+	// preview. Every ID is re-validated server-side; unknown/hostile IDs are
+	// rejected before any SQL is built, so this is safe on untrusted input.
+	mux.HandleFunc("/api/studies/compile", func(w http.ResponseWriter, r *http.Request) {
+		u, ok := requireUser(w, r)
+		if !ok {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		type resp struct {
+			Where   string   `json:"where"`
+			OrderBy string   `json:"orderBy"`
+			Hash    string   `json:"hash,omitempty"`
+			Count   int      `json:"count"`
+			Sample  []string `json:"sample"`
+			Error   string   `json:"error,omitempty"`
+		}
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(resp{Error: "POST only"})
+			return
+		}
+		dec := json.NewDecoder(io.LimitReader(r.Body, 16<<10))
+		dec.DisallowUnknownFields()
+		var def predicate.Definition
+		if err := dec.Decode(&def); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(resp{Error: "bad request: " + err.Error()})
+			return
+		}
+		compiled, err := predicate.Compile(def, resultLimit(u))
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(resp{Error: err.Error()})
+			return
+		}
+		matches, err := preview(study.Study{Where: compiled.Where, OrderBy: compiled.OrderBy, Limit: resultLimit(u)})
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(resp{Error: err.Error()})
+			return
+		}
+		sample := make([]string, 0, 12)
+		for i, m := range matches {
+			if i >= 12 {
+				break
+			}
+			sample = append(sample, m.Symbol)
+		}
+		json.NewEncoder(w).Encode(resp{
+			Where: compiled.Where, OrderBy: compiled.OrderBy, Hash: compiled.Hash,
+			Count: len(matches), Sample: sample,
+		})
 	})
 
 	// Study editor save/delete. Admins manage any study; regular users manage their
