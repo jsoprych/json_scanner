@@ -88,10 +88,12 @@ type Config struct {
 	User string
 }
 
-// defaultCetusDB is the fallback warehouse path. It stays pointed at the pipeline's
-// working copy for now; it flips to the shared central store (../CETUS/cetus.db)
-// once the DATA/CETUS migration lands. Prefer setting CETUS_DB.
-const defaultCetusDB = "../cetus-marketdata-pipeline/cetus.db"
+// defaultCetusDB is the fallback warehouse path: the shared CENTRAL store at
+// DATA/CETUS (../../../DATA/CETUS/cetus.db from the scanner dir), which the pipeline's
+// create-cetus.sh --wipe publishes to. This is the canonical, latest warehouse — NOT
+// the pipeline repo's local dev copy. Prefer setting CETUS_DB (absolute) for robustness
+// against the run directory.
+const defaultCetusDB = "../../../DATA/CETUS/cetus.db"
 
 // resolveDBPath honors the shared warehouse convention:
 //
