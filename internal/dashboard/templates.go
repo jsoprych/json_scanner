@@ -159,6 +159,11 @@ a{color:inherit;text-decoration:none}
 .input--sm{width:90px;padding:5px 8px;font-family:var(--mono)}
 .inline{display:inline}
 .clip{max-width:240px;overflow:hidden;text-overflow:ellipsis}
+.io-row{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;padding:8px;border-top:1px solid var(--border);margin-top:6px}
+.io-import{flex:1;min-width:220px}
+.io-import summary{list-style:none;display:inline-block} .io-import summary::-webkit-details-marker{display:none}
+.io-form{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+.io-form .textarea{flex:1;min-width:240px;min-height:70px}
 .foot-note{color:var(--text-3);font-size:11.5px;text-align:center;padding:14px 0 2px}
 
 @media (max-width:860px){
@@ -232,7 +237,7 @@ const indexSrc = `{{define "index"}}<!doctype html><html lang="en"><head>` + hea
           <tbody>{{range .MyStudies}}<tr>
             <td class="sym">{{.Key}}</td><td>{{.Emoji}} {{.Title}}</td><td>{{.Visibility}}</td><td>{{.Group}}</td>
             <td class="mono clip">{{.Where}}</td>
-            <td><button class="mini" type="button" onclick="editStudy('{{.Key}}')">edit</button>
+            <td><button class="mini" type="button" onclick="editStudy('{{.Key}}')">edit</button><button class="mini" type="button" onclick="cloneStudy('{{.Key}}')">clone</button>
               <form method="post" action="/studies" class="inline"><input type="hidden" name="action" value="delete"><input type="hidden" name="key" value="{{.Key}}"><button class="mini mini--danger" onclick="return confirm('Delete {{.Key}}?')">del</button></form></td>
           </tr>{{end}}</tbody>
         </table>{{else}}<div class="empty">— no studies yet — create one below —</div>{{end}}
@@ -253,6 +258,7 @@ const indexSrc = `{{define "index"}}<!doctype html><html lang="en"><head>` + hea
             {{if and (gt .StudyQuota 0) (ge (len .MyStudies) .StudyQuota)}}<span class="u-warn hint">Limit reached ({{.StudyQuota}}) — upgrade for more.</span>{{end}}
           </div>
         </form>
+        {{template "studyio" .}}
       </div>
     </div>
   </section>
@@ -342,7 +348,7 @@ const adminSrc = `{{define "admin"}}<!doctype html><html lang="en"><head>` + hea
           <tbody>{{range .Studies}}<tr>
             <td class="sym">{{.Key}}</td><td>{{.Emoji}} {{.Title}}</td><td>{{.Owner}}</td><td>{{.Visibility}}</td><td>{{.Tier}}</td><td>{{.Group}}</td>
             <td class="mono clip">{{.Where}}</td>
-            <td><button class="mini" type="button" onclick="editStudy('{{.Key}}')">edit</button>
+            <td><button class="mini" type="button" onclick="editStudy('{{.Key}}')">edit</button><button class="mini" type="button" onclick="cloneStudy('{{.Key}}')">clone</button>
               <form method="post" action="/studies" class="inline"><input type="hidden" name="action" value="delete"><input type="hidden" name="key" value="{{.Key}}"><button class="mini mini--danger" onclick="return confirm('Delete {{.Key}}?')">del</button></form></td>
           </tr>{{end}}</tbody>
         </table>
@@ -359,6 +365,7 @@ const adminSrc = `{{define "admin"}}<!doctype html><html lang="en"><head>` + hea
           <div class="field col-all"><label>WHERE</label><textarea class="textarea" name="where" id="s_where" placeholder="close > sma200 AND rsi14 < 45"></textarea></div>
           <div class="btn-row"><button class="btn btn--primary" type="submit">Save study</button><button class="btn" type="button" onclick="testStudy()">Test WHERE</button><button class="btn" type="button" onclick="clearStudy()">New</button><span class="result" id="s_result"></span></div>
         </form>
+        {{template "studyio" .}}
       </div>
     </div>
   </section>
@@ -385,6 +392,17 @@ const loginSrc = `{{define "login"}}<!doctype html><html lang="en"><head>` + hea
   </div>
 </main></body></html>{{end}}`
 
+// studyioSrc — the shared Export / Import toolbar for study panes.
+const studyioSrc = `{{define "studyio"}}<div class="io-row">
+  <a class="btn" href="/studies/export" download>⭳ Export JSONL</a>
+  <details class="io-import"><summary class="btn">⭱ Import…</summary>
+    <form method="post" action="/studies/import" class="io-form">
+      <textarea class="textarea" name="jsonl" placeholder="paste studies JSONL — one JSON object per line (e.g. from Export)"></textarea>
+      <button class="btn btn--primary" type="submit">Import</button>
+    </form>
+  </details>
+</div>{{end}}`
+
 // appScript — tab switching, theme cycling (persisted), study editor, PWA SW.
 const appScript = `<script>
 (function(){
@@ -406,6 +424,7 @@ function editStudy(k){var s=(window.STUDYDATA||[]).find(function(x){return x.key
   var v=_g('s_vis');if(v)v.value=s.visibility||'private';var t=_g('s_tier');if(t)t.value=s.tier||'free';
   var r=_g('s_result');if(r)r.textContent='editing '+s.key;_g('studyForm').scrollIntoView();}
 function clearStudy(){_g('studyForm').reset();var r=_g('s_result');if(r)r.textContent='';}
+function cloneStudy(k){editStudy(k);var e=_g('s_key');if(e)e.value=(e.value||k)+'-copy';var r=_g('s_result');if(r)r.textContent='cloned '+k+' — change the key & Save';}
 function testStudy(){var b=new URLSearchParams({where:_g('s_where').value,order_by:(_g('s_order')||{}).value||'',limit:(_g('s_limit')||{}).value||'20'});
   _g('s_result').textContent='testing…';
   fetch('/studies/test',{method:'POST',body:b}).then(function(r){return r.json();}).then(function(d){

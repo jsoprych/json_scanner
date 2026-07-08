@@ -163,4 +163,4 @@ var funcs = template.FuncMap{
 	},
 }
 
-var tmpl = template.Must(template.New("dash").Funcs(funcs).Parse(stylesSrc + headerSrc + indexSrc + adminSrc + loginSrc))
+var tmpl = template.Must(template.New("dash").Funcs(funcs).Parse(stylesSrc + headerSrc + studyioSrc + indexSrc + adminSrc + loginSrc))

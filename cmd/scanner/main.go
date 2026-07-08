@@ -888,6 +888,58 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	// Study editor save/delete. Admins manage any study; regular users manage their
 	// own only — owner forced to self, tier forced free, public reserved for admins,
 	// clauses sandboxed, and creation capped by the tier quota.
+	// applyStudy validates + persists a study on behalf of u. Non-admin guardrails:
+	// owner forced to self, tier forced free, public reserved for admins, group needs
+	// membership, clauses sandboxed, new studies capped by the tier quota. Shared by
+	// save and import.
+	applyStudy := func(u user.User, st study.Study) error {
+		st.Key = strings.TrimSpace(st.Key)
+		if st.Key == "" {
+			return fmt.Errorf("key required")
+		}
+		existing, exists := studyStore.Get(st.Key)
+		if exists && !u.IsAdmin() && existing.Owner != u.ID {
+			return fmt.Errorf("study %q is not yours", st.Key)
+		}
+		if !u.IsAdmin() {
+			st.Owner = u.ID
+			st.Tier = user.TierFree
+			switch st.Visibility {
+			case study.VisGroup:
+				if !u.InGroup(st.Group) {
+					return fmt.Errorf("not a member of group %q", st.Group)
+				}
+			default: // public/private/unset → non-admins can't publish public; coerce to private
+				st.Visibility = study.VisPrivate
+			}
+			if err := study.ValidateClause(st.Where); err != nil {
+				return fmt.Errorf("WHERE: %w", err)
+			}
+			if err := study.ValidateClause(st.OrderBy); err != nil {
+				return fmt.Errorf("ORDER BY: %w", err)
+			}
+			if !exists {
+				if q := studyQuota(u, cfg); q > 0 {
+					owned := 0
+					for _, s := range studyStore.All() {
+						if s.Owner == u.ID {
+							owned++
+						}
+					}
+					if owned >= q {
+						return fmt.Errorf("study limit reached (%d) on the %s tier — upgrade for more", q, u.Tier)
+					}
+				}
+			}
+		}
+		if strings.TrimSpace(st.Where) != "" { // catch SQL errors before persisting
+			if _, perr := preview(study.Study{Where: st.Where, OrderBy: st.OrderBy, Limit: 1}); perr != nil {
+				return fmt.Errorf("invalid WHERE: %w", perr)
+			}
+		}
+		return studyStore.Upsert(st)
+	}
+
 	mux.HandleFunc("/studies", func(w http.ResponseWriter, r *http.Request) {
 		u, ok := requireUser(w, r)
 		if !ok {
@@ -903,12 +955,6 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 			back = "/admin"
 		}
 		key := strings.TrimSpace(r.FormValue("key"))
-		existing, exists := studyStore.Get(key)
-		if exists && !u.IsAdmin() && existing.Owner != u.ID {
-			w.WriteHeader(http.StatusForbidden)
-			fmt.Fprintln(w, "403 — not your study")
-			return
-		}
 		switch r.FormValue("action") {
 		case "save":
 			st := study.Study{
@@ -917,68 +963,81 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 				Group: r.FormValue("group"), Tier: user.Tier(r.FormValue("tier")),
 				Where: r.FormValue("where"), OrderBy: r.FormValue("order_by"), Limit: atoiOr(r.FormValue("limit"), 0),
 			}
-			if !u.IsAdmin() {
-				st.Owner = u.ID         // can't create for someone else
-				st.Tier = user.TierFree // tier is an admin/billing concern
-				switch st.Visibility {
-				case study.VisPublic:
-					w.WriteHeader(http.StatusForbidden)
-					fmt.Fprintln(w, "only admins can publish public studies")
-					return
-				case study.VisGroup:
-					if !u.InGroup(st.Group) {
-						w.WriteHeader(http.StatusBadRequest)
-						fmt.Fprintf(w, "you're not a member of group %q", st.Group)
-						return
-					}
-				default:
-					st.Visibility = study.VisPrivate
-				}
-				if err := study.ValidateClause(st.Where); err != nil {
-					w.WriteHeader(http.StatusBadRequest)
-					fmt.Fprintf(w, "WHERE: %v", err)
-					return
-				}
-				if err := study.ValidateClause(st.OrderBy); err != nil {
-					w.WriteHeader(http.StatusBadRequest)
-					fmt.Fprintf(w, "ORDER BY: %v", err)
-					return
-				}
-				if !exists { // quota: cap NEW studies by tier
-					if q := studyQuota(u, cfg); q > 0 {
-						owned := 0
-						for _, s := range studyStore.All() {
-							if s.Owner == u.ID {
-								owned++
-							}
-						}
-						if owned >= q {
-							w.WriteHeader(http.StatusPaymentRequired)
-							fmt.Fprintf(w, "study limit reached (%d) on the %s tier — upgrade for more", q, u.Tier)
-							return
-						}
-					}
-				}
-			}
-			if strings.TrimSpace(st.Where) != "" { // catch SQL errors before persisting
-				if _, perr := preview(study.Study{Where: st.Where, OrderBy: st.OrderBy, Limit: 1}); perr != nil {
-					w.WriteHeader(http.StatusBadRequest)
-					fmt.Fprintf(w, "invalid WHERE: %v", perr)
-					return
-				}
-			}
-			if err := studyStore.Upsert(st); err != nil {
+			if err := applyStudy(u, st); err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				fmt.Fprintf(w, "cannot save study: %v", err)
 				return
 			}
-			log.Info("study saved", "key", st.Key, "by", u.ID, "admin", u.IsAdmin())
+			log.Info("study saved", "key", st.Key, "by", u.ID)
 		case "delete":
+			existing, exists := studyStore.Get(key)
+			if exists && !u.IsAdmin() && existing.Owner != u.ID {
+				w.WriteHeader(http.StatusForbidden)
+				fmt.Fprintln(w, "403 — not your study")
+				return
+			}
 			if err := studyStore.Delete(key); err != nil {
 				log.Warn("study delete failed", "key", key, "error", err)
 			} else {
 				log.Info("study deleted", "key", key, "by", u.ID)
 			}
+		}
+		http.Redirect(w, r, back, http.StatusSeeOther)
+	})
+
+	// Export the acting user's studies (all, for admins) as JSONL — download.
+	mux.HandleFunc("/studies/export", func(w http.ResponseWriter, r *http.Request) {
+		u, ok := requireUser(w, r)
+		if !ok {
+			return
+		}
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		w.Header().Set("Content-Disposition", `attachment; filename="studies.jsonl"`)
+		enc := json.NewEncoder(w)
+		for _, s := range studyStore.All() {
+			if u.IsAdmin() || s.Owner == u.ID {
+				_ = enc.Encode(s)
+			}
+		}
+	})
+
+	// Import studies from pasted JSONL — each applied through the same guardrails.
+	mux.HandleFunc("/studies/import", func(w http.ResponseWriter, r *http.Request) {
+		u, ok := requireUser(w, r)
+		if !ok {
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		r.ParseForm()
+		studies, err := study.LoadJSONL(strings.NewReader(r.FormValue("jsonl")))
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintf(w, "parse error: %v", err)
+			return
+		}
+		imported, failed, firstErr := 0, 0, ""
+		for _, st := range studies {
+			if err := applyStudy(u, st); err != nil {
+				failed++
+				if firstErr == "" {
+					firstErr = err.Error()
+				}
+			} else {
+				imported++
+			}
+		}
+		log.Info("studies imported", "imported", imported, "failed", failed, "by", u.ID)
+		if imported == 0 && failed > 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintf(w, "imported 0 of %d — first error: %s", failed, firstErr)
+			return
+		}
+		back := "/"
+		if u.IsAdmin() {
+			back = "/admin"
 		}
 		http.Redirect(w, r, back, http.StatusSeeOther)
 	})
