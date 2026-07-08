@@ -39,7 +39,7 @@ func (d *DB) Close() error { return d.db.Close() }
 
 // columns of the snapshot table, in insert order.
 var columns = []string{
-	"symbol", "timestamp", "close", "high", "low", "dollar_vol",
+	"symbol", "timestamp", "close", "prev_close", "high", "low", "dollar_vol",
 	"sma50", "sma200", "prev_sma50", "prev_sma200",
 	"rsi14", "prev_rsi14", "ret_3m", "high_52w", "low_52w",
 }
@@ -52,7 +52,7 @@ func (d *DB) Load(rows []screen.SnapshotRow, ts int64) error {
 	}
 	if _, err := d.db.Exec(`CREATE TABLE snapshot(
 		symbol TEXT PRIMARY KEY, timestamp INTEGER,
-		close REAL, high REAL, low REAL, dollar_vol REAL,
+		close REAL, prev_close REAL, high REAL, low REAL, dollar_vol REAL,
 		sma50 REAL, sma200 REAL, prev_sma50 REAL, prev_sma200 REAL,
 		rsi14 REAL, prev_rsi14 REAL, ret_3m REAL, high_52w REAL, low_52w REAL)`); err != nil {
 		return fmt.Errorf("create snapshot: %w", err)
@@ -71,7 +71,7 @@ func (d *DB) Load(rows []screen.SnapshotRow, ts int64) error {
 	defer stmt.Close()
 	for _, r := range rows {
 		if _, err := stmt.Exec(r.Symbol, ts,
-			nz(r.Close), nz(r.High), nz(r.Low), nz(r.DollarVol),
+			nz(r.Close), nz(r.PrevClose), nz(r.High), nz(r.Low), nz(r.DollarVol),
 			nz(r.SMA50), nz(r.SMA200), nz(r.PrevSMA50), nz(r.PrevSMA200),
 			nz(r.RSI14), nz(r.PrevRSI14), nz(r.Ret3m), nz(r.High52w), nz(r.Low52w)); err != nil {
 			tx.Rollback()
