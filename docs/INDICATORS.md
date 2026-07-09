@@ -12,24 +12,27 @@ Read this alongside:
 
 ## Conventions (read first)
 
-### Right-alignment + the 1-bar setback (no lookahead)
+### No Lookahead Principle (CRITICAL)
 
-Every indicator is **right-aligned**: the value stored on bar `T` is computed from
-bars `≤ T` only. There is **zero lookahead** — bar `T`'s row never touches bar
-`T+1`.
+**Every indicator at bar T uses only data from bars < T (excluding the current bar).**
 
-To detect **crosses / transitions** with a plain SQL predicate (no window
-functions, no self-joins), every indicator is stored **with its 1-bar-lagged
-mirror**: for column `x`, we also store `prev_x` = the value on bar `T-1`. This is
-the "1-bar setback."
+This is the fundamental rule of technical indicator calculation. An indicator value
+stored at bar T represents information available BEFORE bar T's close. This prevents
+lookahead bias and ensures backtests reflect real trading conditions.
 
+**Implementation:**
+- Indicator at index `i` is computed from `bars[0..i-1]` (not including `bars[i]`)
+- No `prev_*` columns needed - indicators are already shifted by 1 bar
+- Cross detection uses boolean fields: `golden_cross`, `oversold_bounce`
+
+**Example:**
 ```sql
--- Golden cross fired on the latest bar — one predicate, no LAG():
-WHERE sma50 > sma200 AND prev_sma50 <= prev_sma200
+-- Golden cross: SMA50 crossed above SMA200 (computed at bar T-1)
+WHERE golden_cross = 1
 ```
 
-**Warm-up:** an indicator with window `n` has no value until bar `n` (RSI/EMA
-need ~`3n` bars to stabilize). Rows before warm-up store `NULL`, never a partial
+**Warm-up:** an indicator with window `n` has no value until bar `n+1` (needs `n`
+bars before the current bar). Rows before warm-up store `NULL`, never a partial
 value. Screeners must tolerate `NULL` (SQL `NULL` comparisons are falsy — a
 half-warmed symbol simply doesn't match, which is correct).
 
@@ -62,23 +65,23 @@ line + a rebuild, not a code change.
 
 | Column | Definition | Notes |
 |---|---|---|
-| `sma20` `sma50` `sma200` | Simple MA of close over N | Core MA stack |
-| `ema9` `ema21` `ema50` `ema200` | Exponential MA, `α = 2/(N+1)` | Recursive; seed with SMA(N) |
+| `sma5` `sma10` `sma20` `sma30` `sma50` `sma100` `sma200` | Simple MA of close over N | Computed with no lookahead |
+| `ema10` `ema21` `ema50` `ema100` `ema200` | Exponential MA, `α = 2/(N+1)` | Recursive; seed with SMA(N) |
 | `pct_from_sma50` `pct_from_sma200` | `close / smaN − 1` | "% above/below the N-day" |
-| `sma50_slope` `sma200_slope` | `smaN[T] / smaN[T−5] − 1` | 5-bar slope = trend direction |
-| `ma_stack` | bool: `ema9>ema21>ema50>ema200` | Clean-uptrend flag |
-| *(cross via mirror)* | `sma50`/`sma200` + their `prev_` | Golden/death cross in SQL |
+| `ma_stack` | bool: `ema10>ema21>ema50>ema200` | Clean-uptrend flag |
+| `golden_cross` | bool: SMA50 crossed above SMA200 | Cross detection (no lookahead) |
 
 ### 2. Momentum / oscillators — ✅
 
 | Column | Definition | Notes |
 |---|---|---|
-| `rsi14` | Wilder RSI, 14 | + `prev_rsi14` for cross-30/70 |
-| `macd` `macd_signal` `macd_hist` | EMA12−EMA26; EMA9 of that; diff | + `prev_macd_hist` for zero-cross |
-| `stoch_k` `stoch_d` | Stochastic %K(14), %D(3) | |
-| `roc10` | `close/close[T−10] − 1` | Rate of change |
-| `willr14` | Williams %R, 14 | |
-| `cci20` | Commodity Channel Index, 20 | |
+| `rsi14` | Wilder RSI, 14 | Computed with no lookahead |
+| `oversold_bounce` | bool: RSI14 crossed above 30 | Cross detection (no lookahead) |
+| `macd` `macd_signal` `macd_hist` | EMA12−EMA26; EMA9 of that; diff | (planned) |
+| `stoch_k` `stoch_d` | Stochastic %K(14), %D(3) | (planned) |
+| `roc10` `roc20` | `close/close[T−k] − 1` | Rate of change (planned) |
+| `willr14` | Williams %R, 14 | (planned) |
+| `cci20` | Commodity Channel Index, 20 | (planned) |
 
 ### 3. Volatility / bands — ✅
 
@@ -117,8 +120,8 @@ line + a rebuild, not a code change.
 
 | Column | Definition | Notes |
 |---|---|---|
-| `ret_1d` `ret_5d` `ret_1m` `ret_3m` `ret_6m` `ret_1y` | `close/close[T−k] − 1` | k = 1,5,21,63,126,252 |
-| `rs_spy_3m` `rs_spy_6m` | symbol return − SPY return | Relative strength vs benchmark |
+| `ret_1d` `ret_5d` `ret_1m` `ret_3m` `ret_6m` `ret_1y` | `close[T-1]/close[T-1-k] − 1` | k = 1,5,21,63,126,252 (no lookahead) |
+| `rs_spy_3m` `rs_spy_6m` | symbol return − SPY return | Relative strength vs benchmark (planned) |
 
 ### 7. Volume — trust-flagged
 

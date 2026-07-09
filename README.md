@@ -49,8 +49,8 @@ Any mode scans the universe chosen by `SCANNER_UNIVERSE` (`all` · `exchange:NAS
 
 > **Phase 1 (MVP).** The `digest`/`serve` path is built on a small fixed set of
 > indicators (SMA 50/200, RSI(14), 52-wk high/low, 3-mo return, $-volume) computed
-> right-aligned with a 1-bar setback. See [`docs/PHASE1_MVP.md`](docs/PHASE1_MVP.md)
-> and [`docs/INDICATORS.md`](docs/INDICATORS.md).
+> with **strict no-lookahead** — indicator at bar T uses only bars < T. See
+> [`docs/DESIGN.md`](docs/DESIGN.md) and [`docs/INDICATORS.md`](docs/INDICATORS.md).
 
 ## The read contract
 
@@ -193,7 +193,7 @@ cmd/scanner/          entrypoint: dispatch scan | digest | serve
 internal/model/       neutral types (Bar, Signal)
 internal/store/       READ-ONLY reader of the cetus DB (adjusted_bars, universe)
 internal/scanner/     pure Scan(symbol, bars, cfg) []Signal  (JSONL signals)
-internal/indicators/  pure indicator funcs (SMA, RSI, rolling high/low, return)
+internal/indicators/  pure indicator funcs (modular: trend.go, momentum.go, price.go, returns.go)
 internal/screen/      SnapshotRow build, preset studies, market breadth (pure)
 internal/scan/        concurrent whole-universe snapshot (worker pool, BarLoader iface)
 internal/sentinel/    data-quality Tier-0 flags (deterministic; AI tiers extend it)
@@ -201,11 +201,13 @@ internal/snapshot/    scanner's OWN SQLite store; materialize snapshot + run SQL
 internal/study/       studies as data (SQL-WHERE, JSONL, owner + tier)
 internal/user/        User entity + file-backed Store: tiers, roles, sha256 login, CRUD
 internal/authjwt/     stdlib JWT verifier (HS/RS, alg-confusion-safe) for proxy auth
+internal/api/         REST API handlers (health, features)
+internal/features/    feature catalog with metadata (50+ indicators)
 internal/digest/      Digest assembly + html/text/json renderers
 internal/dashboard/   admin ops-console renderer (serve)
 internal/config/      env-first configuration (SCANNER_*, CETUS_DB)
 internal/telemetry/   slog JSON logger (stderr)
-docs/                 PHASE1_MVP · INDICATORS · SCANNER_DESIGN · AGENTS
+docs/                 DESIGN.md (master) · SCHEMA.md · INDICATORS.md · API.md · DEPLOY-cloudflare.md · AGENTS.md
 ```
 
 ## Deployment
@@ -232,3 +234,16 @@ make vet    # go vet ./...
 The `scanner.Scan` function is **pure** (no I/O) — it's the seam a future
 back-test/strategy engine calls bar-by-bar, and it's unit-tested with synthetic
 bars (no DB needed).
+
+## Documentation
+
+- **[DESIGN.md](docs/DESIGN.md)** — Master design document with table of contents
+- **[SCHEMA.md](docs/SCHEMA.md)** — Snapshot schema reference
+- **[INDICATORS.md](docs/INDICATORS.md)** — Indicator catalog with no-lookahead principle
+- **[API.md](docs/API.md)** — REST API reference
+- **[FEATURE_CATALOG.md](docs/FEATURE_CATALOG.md)** — Feature metadata
+- **[DEPLOY-cloudflare.md](docs/DEPLOY-cloudflare.md)** — Deployment roadmap
+- **[IMPLEMENTATION_PROGRESS.md](docs/IMPLEMENTATION_PROGRESS.md)** — Current status
+- **[AGENTS.md](docs/AGENTS.md)** — Engineering directives
+
+See [`docs/DESIGN.md`](docs/DESIGN.md) for the complete architecture overview.

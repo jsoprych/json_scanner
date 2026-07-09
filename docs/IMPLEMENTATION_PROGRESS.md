@@ -38,12 +38,16 @@
   - Category, data type, sortable flag
   - Wiki URL (Investopedia links)
 
-## In Progress
-
 ### 4. Critical Bug Fix: No-Lookahead Indicators
-- ⏳ Fix indicator calculations to use bars ≤ T-1 (not ≤ T)
-- ⏳ Remove all `prev_*` columns from snapshot schema
-- ⏳ Update tests to reflect shifted values
+- ✅ Fixed all indicator calculations to use bars < T (excluding current bar)
+- ✅ Removed all `prev_*` columns from snapshot schema
+- ✅ Added boolean cross-detection fields (golden_cross, oversold_bounce)
+- ✅ Updated snapshot schema to use boolean columns for crosses
+- ✅ Removed day-over-day delta calculations from Breadth
+- ✅ Updated all tests to reflect new no-lookahead behavior
+- ✅ Modularized indicators into separate files (trend.go, momentum.go, etc.)
+
+## In Progress
 
 ### 5. Expand Indicator Set
 - ⏳ Implement additional indicators (EMA, MACD, ATR, Bollinger, etc.)
@@ -75,11 +79,10 @@
 
 ## Next Steps (Priority Order)
 
-1. **Fix the no-lookahead bug** - This is critical and affects all indicator calculations
-2. **Expand indicator set** - Implement the additional indicators
-3. **Add schema versioning** - Prevent breaking changes from upstream
-4. **Implement snapshot history** - Enable backtesting and audit trail
-5. **Complete API endpoints** - Full REST API for programmatic access
+1. **Expand indicator set** - Implement the additional indicators (EMA, MACD, ATR, Bollinger, etc.)
+2. **Add schema versioning** - Prevent breaking changes from upstream
+3. **Implement snapshot history** - Enable backtesting and audit trail
+4. **Complete API endpoints** - Full REST API for programmatic access
 
 ## Testing
 
