@@ -29,11 +29,11 @@ func TestPredicates(t *testing.T) {
 		t.Error("no bounce: RSI was already above 30")
 	}
 
-	hi := SnapshotRow{High: 50, High52w: 50}
-	if !hi.Is52wHigh() {
+	hi := SnapshotRow{Is52wHigh: true}
+	if !hi.At52wHigh() {
 		t.Error("expected 52w high when today's high equals the window max")
 	}
-	if (SnapshotRow{High: 49, High52w: 50}).Is52wHigh() {
+	if (SnapshotRow{Is52wHigh: false}).At52wHigh() {
 		t.Error("not a 52w high when below window max")
 	}
 }
@@ -55,7 +55,7 @@ func TestBuildAndMomentum(t *testing.T) {
 	if !row.AboveSMA200() {
 		t.Error("rising series should be above its 200-DMA")
 	}
-	if !row.Is52wHigh() {
+	if !row.At52wHigh() {
 		t.Error("last bar of a strictly rising series is a 52w high")
 	}
 	if row.RSI14 != 100 {

@@ -44,8 +44,27 @@ func (d *DB) Close() error { return d.db.Close() }
 
 // columns of the snapshot table, in insert order.
 var columns = []string{
-	"symbol", "timestamp", "close", "high", "low", "dollar_vol",
-	"sma50", "sma200", "rsi14", "ret_3m", "high_52w", "low_52w",
+	"symbol", "timestamp", "close", "high", "low", "open",
+	// Trend indicators
+	"sma5", "sma10", "sma20", "sma30", "sma50", "sma100", "sma200",
+	"ema10", "ema21", "ema50", "ema100", "ema200",
+	"pct_from_sma50", "pct_from_sma200", "ma_stack",
+	// Momentum indicators
+	"rsi14", "macd", "macd_signal", "macd_hist",
+	"stoch_k", "stoch_d", "willr14", "cci20",
+	"roc10", "roc20", "adx14", "di_plus", "di_minus",
+	// Volatility indicators
+	"atr14", "atr_pct",
+	"bb_upper", "bb_mid", "bb_lower", "bb_bandwidth", "bb_pct_b",
+	"hist_vol20",
+	// Price structure
+	"high_52w", "low_52w", "is_52w_high", "is_52w_low",
+	"gap_pct", "true_range", "pct_off_52w_high", "pct_above_52w_low",
+	// Returns
+	"ret_1d", "ret_5d", "ret_1m", "ret_3m", "ret_6m", "ret_1y",
+	// Volume indicators
+	"dollar_vol", "avg_dollar_vol20", "rel_volume", "obv", "vwap_dist", "mfi14",
+	// Cross-detection booleans
 	"golden_cross", "oversold_bounce",
 }
 
@@ -57,8 +76,20 @@ func (d *DB) Load(rows []screen.SnapshotRow, ts int64) error {
 	}
 	if _, err := d.db.Exec(`CREATE TABLE snapshot(
 		symbol TEXT PRIMARY KEY, timestamp INTEGER,
-		close REAL, high REAL, low REAL, dollar_vol REAL,
-		sma50 REAL, sma200 REAL, rsi14 REAL, ret_3m REAL, high_52w REAL, low_52w REAL,
+		close REAL, high REAL, low REAL, open REAL,
+		sma5 REAL, sma10 REAL, sma20 REAL, sma30 REAL, sma50 REAL, sma100 REAL, sma200 REAL,
+		ema10 REAL, ema21 REAL, ema50 REAL, ema100 REAL, ema200 REAL,
+		pct_from_sma50 REAL, pct_from_sma200 REAL, ma_stack INTEGER,
+		rsi14 REAL, macd REAL, macd_signal REAL, macd_hist REAL,
+		stoch_k REAL, stoch_d REAL, willr14 REAL, cci20 REAL,
+		roc10 REAL, roc20 REAL, adx14 REAL, di_plus REAL, di_minus REAL,
+		atr14 REAL, atr_pct REAL,
+		bb_upper REAL, bb_mid REAL, bb_lower REAL, bb_bandwidth REAL, bb_pct_b REAL,
+		hist_vol20 REAL,
+		high_52w REAL, low_52w REAL, is_52w_high INTEGER, is_52w_low INTEGER,
+		gap_pct REAL, true_range REAL, pct_off_52w_high REAL, pct_above_52w_low REAL,
+		ret_1d REAL, ret_5d REAL, ret_1m REAL, ret_3m REAL, ret_6m REAL, ret_1y REAL,
+		dollar_vol REAL, avg_dollar_vol20 REAL, rel_volume REAL, obv REAL, vwap_dist REAL, mfi14 REAL,
 		golden_cross INTEGER, oversold_bounce INTEGER)`); err != nil {
 		return fmt.Errorf("create snapshot: %w", err)
 	}
@@ -75,10 +106,31 @@ func (d *DB) Load(rows []screen.SnapshotRow, ts int64) error {
 	}
 	defer stmt.Close()
 	for _, r := range rows {
-		if _, err := stmt.Exec(r.Symbol, ts,
-			nz(r.Close), nz(r.High), nz(r.Low), nz(r.DollarVol),
-			nz(r.SMA50), nz(r.SMA200), nz(r.RSI14), nz(r.Ret3m), nz(r.High52w), nz(r.Low52w),
-			boolToInt(r.IsGoldenCross), boolToInt(r.IsOversoldBounce)); err != nil {
+		if _, err := stmt.Exec(
+			r.Symbol, ts,
+			nz(r.Close), nz(r.High), nz(r.Low), nz(r.Open),
+			// Trend
+			nz(r.SMA5), nz(r.SMA10), nz(r.SMA20), nz(r.SMA30), nz(r.SMA50), nz(r.SMA100), nz(r.SMA200),
+			nz(r.EMA10), nz(r.EMA21), nz(r.EMA50), nz(r.EMA100), nz(r.EMA200),
+			nz(r.PctFromSMA50), nz(r.PctFromSMA200), boolToInt(r.MAStack),
+			// Momentum
+			nz(r.RSI14), nz(r.MACD), nz(r.MACDSignal), nz(r.MACDHist),
+			nz(r.StochK), nz(r.StochD), nz(r.WilliamsR), nz(r.CCI20),
+			nz(r.ROC10), nz(r.ROC20), nz(r.ADX14), nz(r.DIPlus), nz(r.DIMinus),
+			// Volatility
+			nz(r.ATR14), nz(r.ATRPct),
+			nz(r.BBUpper), nz(r.BBMiddle), nz(r.BBLower), nz(r.BBWidth), nz(r.BBPctB),
+			nz(r.HistVol20),
+			// Price structure
+			nz(r.High52w), nz(r.Low52w), boolToInt(r.Is52wHigh), boolToInt(r.Is52wLow),
+			nz(r.GapPct), nz(r.TrueRange), nz(r.PctOff52wHigh), nz(r.PctAbove52wLow),
+			// Returns
+			nz(r.Ret1d), nz(r.Ret5d), nz(r.Ret1m), nz(r.Ret3m), nz(r.Ret6m), nz(r.Ret1y),
+			// Volume
+			nz(r.DollarVol), nz(r.AvgDollarVol20), nz(r.RelVolume), nz(r.OBV), nz(r.VWAPDist), nz(r.MFI14),
+			// Crosses
+			boolToInt(r.IsGoldenCross), boolToInt(r.IsOversoldBounce),
+		); err != nil {
 			tx.Rollback()
 			return err
 		}
