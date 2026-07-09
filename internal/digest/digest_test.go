@@ -14,9 +14,9 @@ import (
 func TestRenderFromStudies(t *testing.T) {
 	rows := []screen.SnapshotRow{
 		{Symbol: "NVDA", Close: 132.4, High: 132.4, RSI14: 68, Ret3m: 0.21, DollarVol: 5.2e9,
-			SMA50: 120, SMA200: 100, PrevClose: 130, PrevSMA50: 119, PrevSMA200: 99, High52w: 132.4},
+			SMA50: 120, SMA200: 100, IsGoldenCross: true, High52w: 132.4},
 		{Symbol: "TINY", Close: 3.1, High: 3.1, RSI14: 33, Ret3m: -0.05, DollarVol: 4e5,
-			SMA50: 3.2, SMA200: 3.5, PrevClose: 3.0, PrevSMA50: 3.2, PrevSMA200: 3.5, PrevRSI14: 28, High52w: 9},
+			SMA50: 3.2, SMA200: 3.5, IsOversoldBounce: true, High52w: 9},
 	}
 
 	snap, err := snapshot.Open("")

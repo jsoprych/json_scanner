@@ -25,30 +25,29 @@ const (
 )
 
 // SnapshotRow is one symbol's latest cross-sectional state: the display fields plus
-// every feature (and the prev_* mirror) the MVP presets reference. NaN marks a
-// not-yet-warmed feature; comparisons against NaN are false in Go, so an under-warm
-// symbol naturally fails a filter instead of matching on partial data.
+// every feature the MVP presets reference. NaN marks a not-yet-warmed feature;
+// comparisons against NaN are false in Go, so an under-warm symbol naturally fails
+// a filter instead of matching on partial data.
 type SnapshotRow struct {
 	Symbol string  `json:"symbol"`
 	Close  float64 `json:"close"`
 
 	DollarVol float64 `json:"dollar_vol"` // close × volume (feed-safe ranking metric)
 
-	PrevClose float64 `json:"-"` // prior bar's close, for day-over-day breadth
+	SMA50  float64 `json:"sma50"`
+	SMA200 float64 `json:"sma200"`
 
-	SMA50      float64 `json:"sma50"`
-	SMA200     float64 `json:"sma200"`
-	PrevSMA50  float64 `json:"-"`
-	PrevSMA200 float64 `json:"-"`
-
-	RSI14     float64 `json:"rsi14"`
-	PrevRSI14 float64 `json:"-"`
+	RSI14 float64 `json:"rsi14"`
 
 	High    float64 `json:"-"` // today's H/L, for the 52-week flags
 	Low     float64 `json:"-"`
 	High52w float64 `json:"-"`
 	Low52w  float64 `json:"-"`
 	Ret3m   float64 `json:"ret_3m"`
+
+	// Cross-detection booleans (computed directly, no prev_* fields needed)
+	IsGoldenCross    bool `json:"golden_cross"`
+	IsOversoldBounce bool `json:"oversold_bounce"`
 }
 
 // Build derives the latest SnapshotRow from a symbol's ascending, split-adjusted
@@ -90,14 +89,17 @@ func Build(symbol string, bars []model.Bar) (SnapshotRow, bool) {
 		Low52w:    lo52[n-1],
 		Ret3m:     ret3[n-1],
 	}
+
+	// Compute crosses directly with shifted indicators (no prev_* fields needed)
+	// With shifted indicators, the value at n-1 is computed from bars ≤ n-2.
+	// The value at n-2 is computed from bars ≤ n-3.
+	// A golden cross at the latest bar means:
+	//   sma50[n-1] > sma200[n-1] AND sma50[n-2] <= sma200[n-2]
 	if n >= 2 {
-		row.PrevClose = closes[n-2]
-		row.PrevSMA50 = sma50[n-2]
-		row.PrevSMA200 = sma200[n-2]
-		row.PrevRSI14 = rsi[n-2]
-	} else {
-		row.PrevClose, row.PrevSMA50, row.PrevSMA200, row.PrevRSI14 = math.NaN(), math.NaN(), math.NaN(), math.NaN()
+		row.IsGoldenCross = sma50[n-1] > sma200[n-1] && sma50[n-2] <= sma200[n-2]
+		row.IsOversoldBounce = rsi[n-1] > 30 && rsi[n-2] <= 30
 	}
+
 	return row, true
 }
 
@@ -111,12 +113,12 @@ func (r SnapshotRow) AboveSMA50() bool { return r.Close > r.SMA50 }
 
 // GoldenCross reports SMA50 crossing above SMA200 on the latest bar.
 func (r SnapshotRow) GoldenCross() bool {
-	return r.SMA50 > r.SMA200 && r.PrevSMA50 <= r.PrevSMA200
+	return r.IsGoldenCross
 }
 
 // OversoldBounce reports RSI(14) crossing back above 30 on the latest bar.
 func (r SnapshotRow) OversoldBounce() bool {
-	return r.RSI14 > 30 && r.PrevRSI14 <= 30
+	return r.IsOversoldBounce
 }
 
 // Is52wHigh reports today's high being the highest in the trailing 52 weeks.
@@ -177,9 +179,7 @@ func MVPPresets(topN, momentumN int) []Preset {
 
 // --- market breadth ---
 
-// Breadth is the cross-sectional health summary shown atop the digest. The Prev*
-// tallies are the same measures on the prior bar, enabling a day-over-day delta
-// from a single snapshot pass.
+// Breadth is the cross-sectional health summary shown atop the digest.
 type Breadth struct {
 	Total       int `json:"total"`
 	WithSMA200  int `json:"with_sma200"`
@@ -188,11 +188,6 @@ type Breadth struct {
 	AboveSMA50  int `json:"above_sma50"`
 	New52wHigh  int `json:"new_52w_high"`
 	New52wLow   int `json:"new_52w_low"`
-
-	PrevWithSMA200  int `json:"-"`
-	PrevAboveSMA200 int `json:"-"`
-	PrevWithSMA50   int `json:"-"`
-	PrevAboveSMA50  int `json:"-"`
 }
 
 // ComputeBreadth aggregates the snapshot. Percentages are taken over symbols that
@@ -214,19 +209,6 @@ func ComputeBreadth(rows []SnapshotRow) Breadth {
 				b.AboveSMA50++
 			}
 		}
-		// Prior-bar tallies (same eligibility rule, one bar back).
-		if !math.IsNaN(r.PrevSMA200) {
-			b.PrevWithSMA200++
-			if r.PrevClose > r.PrevSMA200 {
-				b.PrevAboveSMA200++
-			}
-		}
-		if !math.IsNaN(r.PrevSMA50) {
-			b.PrevWithSMA50++
-			if r.PrevClose > r.PrevSMA50 {
-				b.PrevAboveSMA50++
-			}
-		}
 		if r.Is52wHigh() {
 			b.New52wHigh++
 		}
@@ -242,17 +224,6 @@ func (b Breadth) PctAbove200() float64 { return pct(b.AboveSMA200, b.WithSMA200)
 
 // PctAbove50 is the share of MA-eligible symbols above their 50-DMA (0 if none).
 func (b Breadth) PctAbove50() float64 { return pct(b.AboveSMA50, b.WithSMA50) }
-
-// DeltaAbove200 is the day-over-day change in the 200-DMA breadth, in percentage
-// points (positive = broadening).
-func (b Breadth) DeltaAbove200() float64 {
-	return b.PctAbove200() - pct(b.PrevAboveSMA200, b.PrevWithSMA200)
-}
-
-// DeltaAbove50 is the day-over-day change in the 50-DMA breadth, in percentage points.
-func (b Breadth) DeltaAbove50() float64 {
-	return b.PctAbove50() - pct(b.PrevAboveSMA50, b.PrevWithSMA50)
-}
 
 func pct(num, den int) float64 {
 	if den == 0 {

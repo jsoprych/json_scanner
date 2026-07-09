@@ -8,26 +8,24 @@ import (
 )
 
 func TestPredicates(t *testing.T) {
-	nan := math.NaN()
-
-	golden := SnapshotRow{SMA50: 11, SMA200: 10, PrevSMA50: 9, PrevSMA200: 10}
+	golden := SnapshotRow{SMA50: 11, SMA200: 10, IsGoldenCross: true}
 	if !golden.GoldenCross() {
 		t.Error("expected golden cross (50 crossing above 200)")
 	}
-	stillBelow := SnapshotRow{SMA50: 9, SMA200: 10, PrevSMA50: 8, PrevSMA200: 10}
+	stillBelow := SnapshotRow{SMA50: 9, SMA200: 10, IsGoldenCross: false}
 	if stillBelow.GoldenCross() {
 		t.Error("no cross: 50 still below 200")
 	}
-	// Under-warm prev must not fire.
-	if (SnapshotRow{SMA50: 11, SMA200: 10, PrevSMA50: nan, PrevSMA200: nan}).GoldenCross() {
+	// Under-warm must not fire.
+	if (SnapshotRow{SMA50: 11, SMA200: 10, IsGoldenCross: false}).GoldenCross() {
 		t.Error("NaN prev must not fire a cross")
 	}
 
-	bounce := SnapshotRow{RSI14: 33, PrevRSI14: 28}
+	bounce := SnapshotRow{RSI14: 33, IsOversoldBounce: true}
 	if !bounce.OversoldBounce() {
 		t.Error("expected oversold bounce (RSI crossing above 30)")
 	}
-	if (SnapshotRow{RSI14: 33, PrevRSI14: 31}).OversoldBounce() {
+	if (SnapshotRow{RSI14: 33, IsOversoldBounce: false}).OversoldBounce() {
 		t.Error("no bounce: RSI was already above 30")
 	}
 

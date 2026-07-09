@@ -52,10 +52,8 @@ const htmlSrc = `<!doctype html>
   <div class="card">
     <h2>Market Breadth</h2>
     <div class="breadth-row">
-      <span class="stat">Above 200-DMA <b>{{pp1 .Breadth.PctAbove200}}%</b>
-        {{$d := .Breadth.DeltaAbove200}}<span class="{{if gt $d 0.05}}up{{else if lt $d -0.05}}down{{else}}flat{{end}}">{{arrow $d}}</span></span>
-      <span class="stat">Above 50-DMA <b>{{pp1 .Breadth.PctAbove50}}%</b>
-        {{$e := .Breadth.DeltaAbove50}}<span class="{{if gt $e 0.05}}up{{else if lt $e -0.05}}down{{else}}flat{{end}}">{{arrow $e}}</span></span>
+      <span class="stat">Above 200-DMA <b>{{pp1 .Breadth.PctAbove200}}%</b></span>
+      <span class="stat">Above 50-DMA <b>{{pp1 .Breadth.PctAbove50}}%</b></span>
     </div>
     <div class="breadth-row">
       <span class="stat">New 52-wk highs <b class="up">{{.Breadth.New52wHigh}}</b></span>
@@ -94,8 +92,8 @@ const textSrc = `CHARTGEOMETRY · MARKET CLOSE SCAN
 {{.DateLabel}} · {{.SymbolsScanned}} symbols scanned
 
 MARKET BREADTH
-  Above 200-DMA: {{pp1 .Breadth.PctAbove200}}%  ({{arrow .Breadth.DeltaAbove200}})
-  Above 50-DMA:  {{pp1 .Breadth.PctAbove50}}%  ({{arrow .Breadth.DeltaAbove50}})
+  Above 200-DMA: {{pp1 .Breadth.PctAbove200}}%
+  Above 50-DMA:  {{pp1 .Breadth.PctAbove50}}%
   New 52-wk highs: {{.Breadth.New52wHigh}}   New lows: {{.Breadth.New52wLow}}
   -> {{mood .Breadth}}
 {{range .Sections}}

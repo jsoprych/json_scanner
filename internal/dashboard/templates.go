@@ -208,10 +208,8 @@ const indexSrc = `{{define "index"}}<!doctype html><html lang="en"><head>` + hea
 
   <section class="pane is-active" data-pane="signals">
     <div class="kpi-grid">
-      <div class="kpi"><div class="kpi__label">Above 200-DMA</div><div class="kpi__value">{{num1 .Digest.Breadth.PctAbove200}}<small>%</small></div>
-        {{$d := .Digest.Breadth.DeltaAbove200}}<div class="kpi__foot"><span class="delta {{if gt0 $d}}is-up{{else if lt0 $d}}is-down{{end}}">{{num1 $d}} pp</span> vs prior</div></div>
-      <div class="kpi"><div class="kpi__label">Above 50-DMA</div><div class="kpi__value">{{num1 .Digest.Breadth.PctAbove50}}<small>%</small></div>
-        {{$e := .Digest.Breadth.DeltaAbove50}}<div class="kpi__foot"><span class="delta {{if gt0 $e}}is-up{{else if lt0 $e}}is-down{{end}}">{{num1 $e}} pp</span> vs prior</div></div>
+      <div class="kpi"><div class="kpi__label">Above 200-DMA</div><div class="kpi__value">{{num1 .Digest.Breadth.PctAbove200}}<small>%</small></div></div>
+      <div class="kpi"><div class="kpi__label">Above 50-DMA</div><div class="kpi__value">{{num1 .Digest.Breadth.PctAbove50}}<small>%</small></div></div>
       <div class="kpi"><div class="kpi__label">New 52-wk highs</div><div class="kpi__value u-up">{{.Digest.Breadth.New52wHigh}}</div><div class="kpi__foot">new lows <b class="u-down">{{.Digest.Breadth.New52wLow}}</b></div></div>
       <div class="kpi"><div class="kpi__label">Universe scanned</div><div class="kpi__value">{{.Digest.SymbolsScanned}}</div><div class="kpi__foot">for {{.Acting.Tier}} tier</div></div>
     </div>
@@ -286,7 +284,7 @@ const adminSrc = `{{define "admin"}}<!doctype html><html lang="en"><head>` + hea
         <div class="meter" title="SUCCESS / IN_FLIGHT / PENDING / EMPTY">
           <i style="width:{{num1 (.Stats.Pct "SUCCESS")}}%;background:var(--up)"></i><i style="width:{{num1 (.Stats.Pct "IN_FLIGHT")}}%;background:var(--accent)"></i><i style="width:{{num1 (.Stats.Pct "PENDING")}}%;background:var(--surface-3)"></i><i style="width:{{num1 (.Stats.Pct "EMPTY")}}%;background:var(--warn)"></i></div></div>
       <div class="kpi"><div class="kpi__label">Data-quality flags</div><div class="kpi__value">{{len .Flags}}</div><div class="kpi__foot"><span class="u-down">{{.Suspect}} suspect</span> · <span class="u-warn">{{.Watch}} watch</span></div></div>
-      <div class="kpi"><div class="kpi__label">Above 200-DMA</div><div class="kpi__value">{{num1 .Digest.Breadth.PctAbove200}}<small>%</small></div>{{$d := .Digest.Breadth.DeltaAbove200}}<div class="kpi__foot"><span class="delta {{if gt0 $d}}is-up{{else if lt0 $d}}is-down{{end}}">{{num1 $d}} pp</span> vs prior</div></div>
+      <div class="kpi"><div class="kpi__label">Above 200-DMA</div><div class="kpi__value">{{num1 .Digest.Breadth.PctAbove200}}<small>%</small></div></div>
       <div class="kpi"><div class="kpi__label">Scan time</div><div class="kpi__value">{{ms .ScanMillis}}</div><div class="kpi__foot">{{len .Users}} users</div></div>
     </div>
     <div class="strip">

@@ -134,10 +134,10 @@ func money(v float64) string {
 
 // breadthMood is a one-line human read of the tape.
 func breadthMood(b screen.Breadth) string {
-	switch d := b.DeltaAbove200(); {
-	case d > 1:
+	switch {
+	case b.PctAbove200() > 60:
 		return "Breadth broadening."
-	case d < -1:
+	case b.PctAbove200() < 40:
 		return "Breadth narrowing."
 	default:
 		return "Breadth steady."

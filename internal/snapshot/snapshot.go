@@ -44,9 +44,9 @@ func (d *DB) Close() error { return d.db.Close() }
 
 // columns of the snapshot table, in insert order.
 var columns = []string{
-	"symbol", "timestamp", "close", "prev_close", "high", "low", "dollar_vol",
-	"sma50", "sma200", "prev_sma50", "prev_sma200",
-	"rsi14", "prev_rsi14", "ret_3m", "high_52w", "low_52w",
+	"symbol", "timestamp", "close", "high", "low", "dollar_vol",
+	"sma50", "sma200", "rsi14", "ret_3m", "high_52w", "low_52w",
+	"golden_cross", "oversold_bounce",
 }
 
 // Load (re)creates the snapshot table and inserts rows. NaN → NULL so SQL
@@ -57,9 +57,9 @@ func (d *DB) Load(rows []screen.SnapshotRow, ts int64) error {
 	}
 	if _, err := d.db.Exec(`CREATE TABLE snapshot(
 		symbol TEXT PRIMARY KEY, timestamp INTEGER,
-		close REAL, prev_close REAL, high REAL, low REAL, dollar_vol REAL,
-		sma50 REAL, sma200 REAL, prev_sma50 REAL, prev_sma200 REAL,
-		rsi14 REAL, prev_rsi14 REAL, ret_3m REAL, high_52w REAL, low_52w REAL)`); err != nil {
+		close REAL, high REAL, low REAL, dollar_vol REAL,
+		sma50 REAL, sma200 REAL, rsi14 REAL, ret_3m REAL, high_52w REAL, low_52w REAL,
+		golden_cross INTEGER, oversold_bounce INTEGER)`); err != nil {
 		return fmt.Errorf("create snapshot: %w", err)
 	}
 
@@ -76,9 +76,9 @@ func (d *DB) Load(rows []screen.SnapshotRow, ts int64) error {
 	defer stmt.Close()
 	for _, r := range rows {
 		if _, err := stmt.Exec(r.Symbol, ts,
-			nz(r.Close), nz(r.PrevClose), nz(r.High), nz(r.Low), nz(r.DollarVol),
-			nz(r.SMA50), nz(r.SMA200), nz(r.PrevSMA50), nz(r.PrevSMA200),
-			nz(r.RSI14), nz(r.PrevRSI14), nz(r.Ret3m), nz(r.High52w), nz(r.Low52w)); err != nil {
+			nz(r.Close), nz(r.High), nz(r.Low), nz(r.DollarVol),
+			nz(r.SMA50), nz(r.SMA200), nz(r.RSI14), nz(r.Ret3m), nz(r.High52w), nz(r.Low52w),
+			boolToInt(r.IsGoldenCross), boolToInt(r.IsOversoldBounce)); err != nil {
 			tx.Rollback()
 			return err
 		}
@@ -117,6 +117,14 @@ func nz(v float64) any {
 		return nil
 	}
 	return v
+}
+
+// boolToInt converts a boolean to an integer (0 or 1) for SQLite storage.
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // Match is one study hit (fixed display projection).

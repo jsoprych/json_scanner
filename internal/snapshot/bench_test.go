@@ -18,7 +18,7 @@ func synthRows(n int) []screen.SnapshotRow {
 		rows[i] = screen.SnapshotRow{
 			Symbol: fmt.Sprintf("SY%05d", i), Close: close, High: close * (1 + r.Float64()*0.02),
 			DollarVol: r.Float64() * 5e8, SMA50: close * (0.9 + r.Float64()*0.2), SMA200: close * (0.8 + r.Float64()*0.3),
-			PrevSMA50: close * 0.95, PrevSMA200: close * 0.97, RSI14: r.Float64() * 100, PrevRSI14: r.Float64() * 100,
+			RSI14: r.Float64() * 100, IsGoldenCross: r.Float64() > 0.9, IsOversoldBounce: r.Float64() > 0.95,
 			Ret3m: (r.Float64() - 0.4), High52w: close * (1 + r.Float64()*0.1),
 		}
 	}
