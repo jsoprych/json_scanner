@@ -86,6 +86,13 @@ type Config struct {
 	UsersPath string
 	// User is the acting user id — resolved against UsersPath; tier/role gate access.
 	User string
+
+	// --- snapshot history ---
+
+	// SnapshotRetentionDays is how many days of snapshots to keep (0 = no retention).
+	SnapshotRetentionDays int
+	// BackfillDays is how many days to backfill on `scanner backfill` (0 = no backfill).
+	BackfillDays int
 }
 
 // defaultCetusDB is the fallback warehouse path: the shared CENTRAL store at
@@ -157,6 +164,10 @@ func Load() Config {
 		FreeStudyQuota: envInt("SCANNER_FREE_STUDY_QUOTA", 3),
 		UsersPath:      envOr("SCANNER_USERS_PATH", "users.jsonl"),
 		User:           envOr("SCANNER_USER", "global"),
+
+		// Snapshot history: keep 90 days by default, backfill 0 (opt-in).
+		SnapshotRetentionDays: envInt("SCANNER_SNAPSHOT_RETENTION_DAYS", 90),
+		BackfillDays:          envInt("SCANNER_BACKFILL_DAYS", 0),
 	}
 }
 

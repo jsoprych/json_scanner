@@ -22,6 +22,7 @@ cetus-marketdata-pipeline  ──(SQLite: adjusted_bars)──►  cetus-marketd
 | `scanner serve` | Live HTTP dashboard with **per-session login**. **`/login`** signs in; **`/`** = user dashboard (breadth + the acting user's studies); **`/admin`** = operator console + **user CRUD** + **study editor** (write/test/save SQL-`WHERE` studies with a live preview), **admin-only**. Sign out switches users. Cached scan (`?refresh=1`) |
 | `scanner anomalies` | **Data-quality pass** (Sentinel Tier-0): flags extreme-move × thin-liquidity × price/200-DMA outliers as text/JSONL — the deterministic seam the future cross-source + LLM tiers extend |
 | `scanner studies` | Materializes the snapshot into the scanner's **own SQLite store** and runs a user's **tier-accessible SQL-`WHERE` studies** (`studies.jsonl`) — pre-DSL, SQL is the study language |
+| `scanner backfill` | **Historical snapshot backfill** — builds date-stamped snapshots for the past N days (`SCANNER_BACKFILL_DAYS`), with retention cleanup (`SCANNER_SNAPSHOT_RETENTION_DAYS`). Requires a persistent `SCANNER_STORE_DB` |
 | `scanner users` | List the seeded users (id · tier · role) from `users.jsonl` |
 
 Study access has **three independent axes** (ugo-inspired, but not raw rwx):
@@ -185,6 +186,8 @@ the read-only cetus warehouse**:
 | `SCANNER_STUDIES_FORMAT` | `text` | `text` \| `jsonl` |
 | `SCANNER_USERS_PATH` | `users.jsonl` | User registry (id · tier · role) |
 | `SCANNER_USER` | `global` | Acting user id — resolved against the registry; tier/role gate access |
+| `SCANNER_SNAPSHOT_RETENTION_DAYS` | `90` | Days of snapshots to keep (0 = no retention cleanup) |
+| `SCANNER_BACKFILL_DAYS` | `0` | Days to backfill on `scanner backfill` (0 = disabled) |
 
 ## Layout
 

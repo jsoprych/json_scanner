@@ -118,3 +118,73 @@ func Universe(ctx context.Context, loader BarLoader, symbols []string, opts Opti
 	}
 	return res
 }
+
+// SnapshotStore is the interface for storing historical snapshots.
+type SnapshotStore interface {
+	LoadHistory(rows []screen.SnapshotRow, barTs, snapshotDate int64) error
+	Cleanup(keepDays int) (int, error)
+}
+
+// BackfillOptions tunes a historical snapshot backfill.
+type BackfillOptions struct {
+	Days         int     // number of historical days to backfill
+	KeepDays     int     // retention period for cleanup (0 = no cleanup)
+	MinDollarVol float64 // liquidity floor
+	Workers      int     // parallelism
+}
+
+// BackfillSnapshots builds historical snapshots for the past N days.
+// For each day, it loads bars up to that day, computes indicators, and stores the snapshot.
+// This enables backtesting and audit trails.
+func BackfillSnapshots(ctx context.Context, loader BarLoader, store SnapshotStore, symbols []string, opts BackfillOptions, log *slog.Logger) (int, error) {
+	if opts.Days <= 0 {
+		return 0, nil
+	}
+	workers := opts.Workers
+	if workers <= 0 {
+		workers = runtime.NumCPU()
+	}
+
+	now := time.Now().UTC()
+	var backfilled int
+
+	for dayOffset := opts.Days - 1; dayOffset >= 0; dayOffset-- {
+		if ctx.Err() != nil {
+			return backfilled, ctx.Err()
+		}
+		snapshotDay := now.AddDate(0, 0, -dayOffset)
+		snapshotDate := time.Date(snapshotDay.Year(), snapshotDay.Month(), snapshotDay.Day(), 0, 0, 0, 0, time.UTC).Unix()
+
+		// Load bars up to this day (400 days lookback covers 52-week high)
+		since := snapshotDay.AddDate(0, 0, -400).Unix()
+		res := Universe(ctx, loader, symbols, Options{
+			Since:        since,
+			MinDollarVol: opts.MinDollarVol,
+			Workers:      workers,
+		}, log)
+
+		if len(res.Rows) == 0 {
+			log.Warn("no data for snapshot", "date", snapshotDay.Format("2006-01-02"))
+			continue
+		}
+
+		if err := store.LoadHistory(res.Rows, res.Day.Unix(), snapshotDate); err != nil {
+			log.Error("store snapshot failed", "date", snapshotDay.Format("2006-01-02"), "error", err)
+			continue
+		}
+		backfilled++
+		log.Info("snapshot stored", "date", snapshotDay.Format("2006-01-02"), "symbols", len(res.Rows))
+	}
+
+	// Cleanup old snapshots
+	if opts.KeepDays > 0 {
+		deleted, err := store.Cleanup(opts.KeepDays)
+		if err != nil {
+			log.Error("cleanup failed", "error", err)
+		} else if deleted > 0 {
+			log.Info("snapshots cleaned up", "deleted_dates", deleted, "keep_days", opts.KeepDays)
+		}
+	}
+
+	return backfilled, nil
+}

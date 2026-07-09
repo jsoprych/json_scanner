@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"cetus-marketdata-scanner/internal/screen"
 	"cetus-marketdata-scanner/internal/study"
@@ -22,6 +23,7 @@ type DB struct {
 	snapshotID   string
 	symbolCount  int
 	snapshotDate int64
+	activeDate   int64 // the snapshot_date used for Run queries
 }
 
 // Open opens a snapshot DB; path "" (or ":memory:") uses an in-memory DB. A single
@@ -44,7 +46,7 @@ func (d *DB) Close() error { return d.db.Close() }
 
 // columns of the snapshot table, in insert order.
 var columns = []string{
-	"symbol", "timestamp", "close", "high", "low", "open",
+	"snapshot_date", "symbol", "timestamp", "close", "high", "low", "open",
 	// Trend indicators
 	"sma5", "sma10", "sma20", "sma30", "sma50", "sma100", "sma200",
 	"ema10", "ema21", "ema50", "ema100", "ema200",
@@ -70,12 +72,13 @@ var columns = []string{
 
 // Load (re)creates the snapshot table and inserts rows. NaN → NULL so SQL
 // comparisons behave: an under-warmed feature is NULL and simply never matches.
+// This is the legacy single-snapshot mode; use LoadHistory for date-stamped snapshots.
 func (d *DB) Load(rows []screen.SnapshotRow, ts int64) error {
 	if _, err := d.db.Exec(`DROP TABLE IF EXISTS snapshot`); err != nil {
 		return fmt.Errorf("drop snapshot: %w", err)
 	}
 	if _, err := d.db.Exec(`CREATE TABLE snapshot(
-		symbol TEXT PRIMARY KEY, timestamp INTEGER,
+		snapshot_date INTEGER, symbol TEXT, timestamp INTEGER,
 		close REAL, high REAL, low REAL, open REAL,
 		sma5 REAL, sma10 REAL, sma20 REAL, sma30 REAL, sma50 REAL, sma100 REAL, sma200 REAL,
 		ema10 REAL, ema21 REAL, ema50 REAL, ema100 REAL, ema200 REAL,
@@ -90,7 +93,8 @@ func (d *DB) Load(rows []screen.SnapshotRow, ts int64) error {
 		gap_pct REAL, true_range REAL, pct_off_52w_high REAL, pct_above_52w_low REAL,
 		ret_1d REAL, ret_5d REAL, ret_1m REAL, ret_3m REAL, ret_6m REAL, ret_1y REAL,
 		dollar_vol REAL, avg_dollar_vol20 REAL, rel_volume REAL, obv REAL, vwap_dist REAL, mfi14 REAL,
-		golden_cross INTEGER, oversold_bounce INTEGER)`); err != nil {
+		golden_cross INTEGER, oversold_bounce INTEGER,
+		PRIMARY KEY (snapshot_date, symbol))`); err != nil {
 		return fmt.Errorf("create snapshot: %w", err)
 	}
 
@@ -107,7 +111,7 @@ func (d *DB) Load(rows []screen.SnapshotRow, ts int64) error {
 	defer stmt.Close()
 	for _, r := range rows {
 		if _, err := stmt.Exec(
-			r.Symbol, ts,
+			ts, r.Symbol, ts,
 			nz(r.Close), nz(r.High), nz(r.Low), nz(r.Open),
 			// Trend
 			nz(r.SMA5), nz(r.SMA10), nz(r.SMA20), nz(r.SMA30), nz(r.SMA50), nz(r.SMA100), nz(r.SMA200),
@@ -141,10 +145,142 @@ func (d *DB) Load(rows []screen.SnapshotRow, ts int64) error {
 
 	// Update metadata
 	d.snapshotDate = ts
+	d.activeDate = ts
 	d.symbolCount = len(rows)
 	d.snapshotID = fmt.Sprintf("%d", ts)
 
 	return nil
+}
+
+// LoadHistory inserts a snapshot for a specific date without dropping existing data.
+// The snapshot_date is the date the snapshot was computed for (typically the latest bar date).
+// Multiple snapshots can coexist, keyed by (snapshot_date, symbol).
+func (d *DB) LoadHistory(rows []screen.SnapshotRow, barTs, snapshotDate int64) error {
+	// Ensure the table exists (idempotent)
+	if _, err := d.db.Exec(`CREATE TABLE IF NOT EXISTS snapshot(
+		snapshot_date INTEGER, symbol TEXT, timestamp INTEGER,
+		close REAL, high REAL, low REAL, open REAL,
+		sma5 REAL, sma10 REAL, sma20 REAL, sma30 REAL, sma50 REAL, sma100 REAL, sma200 REAL,
+		ema10 REAL, ema21 REAL, ema50 REAL, ema100 REAL, ema200 REAL,
+		pct_from_sma50 REAL, pct_from_sma200 REAL, ma_stack INTEGER,
+		rsi14 REAL, macd REAL, macd_signal REAL, macd_hist REAL,
+		stoch_k REAL, stoch_d REAL, willr14 REAL, cci20 REAL,
+		roc10 REAL, roc20 REAL, adx14 REAL, di_plus REAL, di_minus REAL,
+		atr14 REAL, atr_pct REAL,
+		bb_upper REAL, bb_mid REAL, bb_lower REAL, bb_bandwidth REAL, bb_pct_b REAL,
+		hist_vol20 REAL,
+		high_52w REAL, low_52w REAL, is_52w_high INTEGER, is_52w_low INTEGER,
+		gap_pct REAL, true_range REAL, pct_off_52w_high REAL, pct_above_52w_low REAL,
+		ret_1d REAL, ret_5d REAL, ret_1m REAL, ret_3m REAL, ret_6m REAL, ret_1y REAL,
+		dollar_vol REAL, avg_dollar_vol20 REAL, rel_volume REAL, obv REAL, vwap_dist REAL, mfi14 REAL,
+		golden_cross INTEGER, oversold_bounce INTEGER,
+		PRIMARY KEY (snapshot_date, symbol))`); err != nil {
+		return fmt.Errorf("create snapshot: %w", err)
+	}
+
+	// Delete existing snapshot for this date (replace, not append)
+	if _, err := d.db.Exec("DELETE FROM snapshot WHERE snapshot_date = ?", snapshotDate); err != nil {
+		return fmt.Errorf("delete old snapshot: %w", err)
+	}
+
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	ph := strings.TrimSuffix(strings.Repeat("?,", len(columns)), ",")
+	stmt, err := tx.Prepare("INSERT INTO snapshot(" + strings.Join(columns, ",") + ") VALUES(" + ph + ")")
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	defer stmt.Close()
+	for _, r := range rows {
+		if _, err := stmt.Exec(
+			snapshotDate, r.Symbol, barTs,
+			nz(r.Close), nz(r.High), nz(r.Low), nz(r.Open),
+			nz(r.SMA5), nz(r.SMA10), nz(r.SMA20), nz(r.SMA30), nz(r.SMA50), nz(r.SMA100), nz(r.SMA200),
+			nz(r.EMA10), nz(r.EMA21), nz(r.EMA50), nz(r.EMA100), nz(r.EMA200),
+			nz(r.PctFromSMA50), nz(r.PctFromSMA200), boolToInt(r.MAStack),
+			nz(r.RSI14), nz(r.MACD), nz(r.MACDSignal), nz(r.MACDHist),
+			nz(r.StochK), nz(r.StochD), nz(r.WilliamsR), nz(r.CCI20),
+			nz(r.ROC10), nz(r.ROC20), nz(r.ADX14), nz(r.DIPlus), nz(r.DIMinus),
+			nz(r.ATR14), nz(r.ATRPct),
+			nz(r.BBUpper), nz(r.BBMiddle), nz(r.BBLower), nz(r.BBWidth), nz(r.BBPctB),
+			nz(r.HistVol20),
+			nz(r.High52w), nz(r.Low52w), boolToInt(r.Is52wHigh), boolToInt(r.Is52wLow),
+			nz(r.GapPct), nz(r.TrueRange), nz(r.PctOff52wHigh), nz(r.PctAbove52wLow),
+			nz(r.Ret1d), nz(r.Ret5d), nz(r.Ret1m), nz(r.Ret3m), nz(r.Ret6m), nz(r.Ret1y),
+			nz(r.DollarVol), nz(r.AvgDollarVol20), nz(r.RelVolume), nz(r.OBV), nz(r.VWAPDist), nz(r.MFI14),
+			boolToInt(r.IsGoldenCross), boolToInt(r.IsOversoldBounce),
+		); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	// Update metadata to reflect the latest snapshot
+	d.snapshotDate = snapshotDate
+	d.activeDate = snapshotDate
+	d.symbolCount = len(rows)
+	d.snapshotID = fmt.Sprintf("%d", snapshotDate)
+
+	return nil
+}
+
+// ListSnapshots returns the available snapshot dates (Unix seconds), newest first.
+func (d *DB) ListSnapshots() ([]int64, error) {
+	rows, err := d.db.Query("SELECT DISTINCT snapshot_date FROM snapshot ORDER BY snapshot_date DESC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var dates []int64
+	for rows.Next() {
+		var ts int64
+		if err := rows.Scan(&ts); err != nil {
+			return nil, err
+		}
+		dates = append(dates, ts)
+	}
+	return dates, rows.Err()
+}
+
+// SetActive sets the active snapshot date for Run queries. Returns an error if the
+// date doesn't exist in the snapshot table.
+func (d *DB) SetActive(snapshotDate int64) error {
+	var n int
+	if err := d.db.QueryRow("SELECT COUNT(*) FROM snapshot WHERE snapshot_date = ?", snapshotDate).Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("snapshot date %d not found", snapshotDate)
+	}
+	d.activeDate = snapshotDate
+	return nil
+}
+
+// Cleanup deletes snapshots older than keepDays. Returns the number of dates deleted.
+func (d *DB) Cleanup(keepDays int) (int, error) {
+	if keepDays <= 0 {
+		return 0, nil
+	}
+	// Count distinct dates before cleanup
+	var before int
+	if err := d.db.QueryRow("SELECT COUNT(DISTINCT snapshot_date) FROM snapshot").Scan(&before); err != nil {
+		return 0, err
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -keepDays).Unix()
+	if _, err := d.db.Exec("DELETE FROM snapshot WHERE snapshot_date < ?", cutoff); err != nil {
+		return 0, err
+	}
+	var after int
+	if err := d.db.QueryRow("SELECT COUNT(DISTINCT snapshot_date) FROM snapshot").Scan(&after); err != nil {
+		return 0, err
+	}
+	return before - after, nil
 }
 
 // Metadata returns snapshot metadata for API responses.
@@ -193,19 +329,20 @@ type Match struct {
 // The study SQL is TRUSTED — it comes from the Global user's local config. When
 // untrusted, user-authored SQL arrives (multi-user, paid tier), it must be
 // validated/sandboxed (allow-list of columns/operators) before reaching here.
+// Queries are scoped to the active snapshot date (set by SetActive or Load).
 func (d *DB) Run(s study.Study) ([]Match, error) {
 	where := strings.TrimSpace(s.Where)
 	if where == "" {
 		where = "1=1"
 	}
-	q := "SELECT symbol, close, rsi14, ret_3m, dollar_vol FROM snapshot WHERE (" + where + ")"
+	q := "SELECT symbol, close, rsi14, ret_3m, dollar_vol FROM snapshot WHERE snapshot_date = ? AND (" + where + ")"
 	if s.OrderBy != "" {
 		q += " ORDER BY " + s.OrderBy
 	}
 	if s.Limit > 0 {
 		q += fmt.Sprintf(" LIMIT %d", s.Limit)
 	}
-	rows, err := d.db.Query(q)
+	rows, err := d.db.Query(q, d.activeDate)
 	if err != nil {
 		return nil, fmt.Errorf("study %q: %w", s.Key, err)
 	}

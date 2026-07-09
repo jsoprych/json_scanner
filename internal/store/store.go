@@ -19,8 +19,9 @@ import (
 
 // Store wraps a read-only handle to the cetus warehouse.
 type Store struct {
-	db   *sql.DB
-	bars string // the bars read surface in use (published_bars|clean_bars|adjusted_bars)
+	db     *sql.DB
+	bars   string // the bars read surface in use (published_bars|clean_bars|adjusted_bars)
+	schema int    // warehouse schema version (0 = unversioned)
 }
 
 // barsPreference is the read surface in order of preference: the materialized,
@@ -28,6 +29,14 @@ type Store struct {
 // view (quarantine-free, but recomputed); else adjusted_bars (keeps quarantined bars).
 // Per docs/DOWNSTREAM.md — prefer published_bars, never filter/adjust client-side.
 var barsPreference = []string{"published_bars", "clean_bars", "adjusted_bars"}
+
+// MinSchemaVersion is the oldest warehouse schema this scanner can read. If the
+// warehouse reports a version below this, the scanner must upgrade before continuing.
+const MinSchemaVersion = 1
+
+// MaxSchemaVersion is the newest warehouse schema this scanner understands. If the
+// warehouse reports a version above this, the scanner must upgrade before continuing.
+const MaxSchemaVersion = 1
 
 // OpenReadOnly opens the warehouse read-only. WAL permits concurrent reads
 // alongside the pipeline's single writer; we never write or run DDL.
@@ -58,7 +67,25 @@ func OpenReadOnly(ctx context.Context, path string) (*Store, error) {
 			break
 		}
 	}
+
+	s.schema = s.detectSchemaVersion(ctx)
+
 	return s, nil
+}
+
+// detectSchemaVersion reads the warehouse's schema_version table if it exists.
+// Returns 0 if the table is absent (pre-versioning warehouse).
+func (s *Store) detectSchemaVersion(ctx context.Context) int {
+	var n int
+	if err := s.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM sqlite_master WHERE name='schema_version' AND type='table'").Scan(&n); err != nil || n == 0 {
+		return 0
+	}
+	var ver int
+	if err := s.db.QueryRowContext(ctx, "SELECT version FROM schema_version ORDER BY id DESC LIMIT 1").Scan(&ver); err != nil {
+		return 0
+	}
+	return ver
 }
 
 // Close releases the handle.
@@ -66,6 +93,25 @@ func (s *Store) Close() error { return s.db.Close() }
 
 // BarsTable reports which read surface the store resolved to.
 func (s *Store) BarsTable() string { return s.bars }
+
+// SchemaVersion reports the warehouse's schema version (0 = unversioned).
+func (s *Store) SchemaVersion() int { return s.schema }
+
+// CheckSchema returns an error if the warehouse schema is outside the supported
+// range. An unversioned warehouse (version 0) is allowed with a warning — the
+// pre-versioning schema is compatible with MinSchemaVersion.
+func (s *Store) CheckSchema() error {
+	if s.schema == 0 {
+		return nil
+	}
+	if s.schema < MinSchemaVersion {
+		return fmt.Errorf("warehouse schema v%d is too old (scanner requires v%d–v%d); upgrade cetus-marketdata-pipeline", s.schema, MinSchemaVersion, MaxSchemaVersion)
+	}
+	if s.schema > MaxSchemaVersion {
+		return fmt.Errorf("warehouse schema v%d is too new (scanner supports up to v%d); upgrade cetus-marketdata-scanner", s.schema, MaxSchemaVersion)
+	}
+	return nil
+}
 
 // Universe returns the symbols with successfully-ingested data (ascending), per
 // symbol_pipeline_state. EMPTY/FAILED symbols are excluded — EMPTY has no data on

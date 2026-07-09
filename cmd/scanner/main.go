@@ -164,8 +164,10 @@ func main() {
 		runStudies(ctx, log, cfg)
 	case "users":
 		runUsers(log, cfg)
+	case "backfill":
+		runBackfill(ctx, log, cfg)
 	default:
-		log.Error("unknown subcommand", "arg", sub, "want", "scan|digest|serve|anomalies|studies|users")
+		log.Error("unknown subcommand", "arg", sub, "want", "scan|digest|serve|anomalies|studies|users|backfill")
 		os.Exit(2)
 	}
 }
@@ -207,6 +209,16 @@ func openUniverse(ctx context.Context, log *slog.Logger, cfg config.Config) (*st
 	if err != nil {
 		log.Error("open warehouse failed", "db", cfg.DBPath, "error", err)
 		os.Exit(1)
+	}
+	if err := st.CheckSchema(); err != nil {
+		log.Error("schema version mismatch", "error", err)
+		st.Close()
+		os.Exit(1)
+	}
+	if st.SchemaVersion() == 0 {
+		log.Warn("warehouse is unversioned — assuming compatibility", "db", cfg.DBPath)
+	} else {
+		log.Info("warehouse schema", "version", st.SchemaVersion())
 	}
 	universe, err := resolveUniverse(ctx, log, st, cfg)
 	if err != nil {
@@ -518,6 +530,59 @@ func runStudies(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	}
 	log.Info("studies complete", "user", u.ID, "tier", u.Tier, "studies", len(studies),
 		"snapshot_rows", len(res.Rows), "store", cfg.StoreDB, "day", res.Day.Format("2006-01-02"))
+}
+
+// runBackfill builds historical snapshots for the past N days and stores them
+// with date-stamped retention. Requires SCANNER_STORE_DB to be a persistent path
+// (not :memory:) so snapshots survive across runs.
+func runBackfill(ctx context.Context, log *slog.Logger, cfg config.Config) {
+	if cfg.StoreDB == "" || cfg.StoreDB == ":memory:" {
+		log.Error("backfill requires a persistent SCANNER_STORE_DB (not :memory:)")
+		os.Exit(1)
+	}
+	if cfg.BackfillDays <= 0 {
+		log.Error("SCANNER_BACKFILL_DAYS must be > 0 for backfill")
+		os.Exit(1)
+	}
+
+	st, universe := openUniverse(ctx, log, cfg)
+	defer st.Close()
+
+	snap, err := snapshot.Open(cfg.StoreDB)
+	if err != nil {
+		log.Error("open snapshot store failed", "store", cfg.StoreDB, "error", err)
+		os.Exit(1)
+	}
+	defer snap.Close()
+
+	log.Info("backfill starting", "days", cfg.BackfillDays, "retention_days", cfg.SnapshotRetentionDays,
+		"symbols", len(universe), "store", cfg.StoreDB)
+
+	backfilled, err := scan.BackfillSnapshots(ctx, st, snap, universe, scan.BackfillOptions{
+		Days:         cfg.BackfillDays,
+		KeepDays:     cfg.SnapshotRetentionDays,
+		MinDollarVol: 0,
+		Workers:      cfg.DigestWorkers,
+	}, log)
+	if err != nil {
+		log.Error("backfill failed", "error", err)
+		os.Exit(1)
+	}
+
+	dates, _ := snap.ListSnapshots()
+	log.Info("backfill complete", "backfilled", backfilled, "total_snapshots", len(dates),
+		"oldest", func() string {
+			if len(dates) == 0 {
+				return "none"
+			}
+			return time.Unix(dates[len(dates)-1], 0).UTC().Format("2006-01-02")
+		}(),
+		"newest", func() string {
+			if len(dates) == 0 {
+				return "none"
+			}
+			return time.Unix(dates[0], 0).UTC().Format("2006-01-02")
+		}())
 }
 
 // runServe serves the login + user dashboard (/) + admin console (/admin) with
@@ -1143,8 +1208,8 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		page(w, r, false, func(m *dashboard.Model, out io.Writer) error { return m.IndexHTML(out) })
 	})
 
-	// REST API v1 - mount the API handler
-	apiHandler := api.NewHandler(snap, log)
+	// REST API v1 - mount the API handler with full dependencies
+	apiHandler := api.NewHandlerWithDeps(snap, studyStore, st, log)
 	mux.Handle("/api/v1/", apiHandler.Router())
 
 	// Bind first, so a port collision fails immediately with a clear error instead of

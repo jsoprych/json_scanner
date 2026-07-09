@@ -55,34 +55,40 @@
 - ⏳ Update predicate registry for new features
 
 ### 6. Schema Versioning
-- ⏳ Add `schema_version` table to cetus.db (pipeline side)
-- ⏳ Add version check to scanner startup
-- ⏳ Document versioning policy in SCHEMA.md
+- ⏳ **Deferred** — scanner-side check is implemented (forward-compatible), but the pipeline must first create the `schema_version` table
+- ⏳ See `docs/TICKET-PIPELINE-SCHEMA-VERSIONING.md` for the pipeline-side implementation ticket
+- ⏳ Once the pipeline stamps version 1, the scanner will automatically detect and validate it
 
 ### 7. Snapshot History
-- ⏳ Add `snapshot_date` column to snapshot table
-- ⏳ Implement snapshot retention (last 90 days)
-- ⏳ Add cleanup job for old snapshots
-- ⏳ Implement `BackfillSnapshots(days)` function
+- ✅ Added `snapshot_date` column to snapshot table (composite PK: snapshot_date, symbol)
+- ✅ Implemented `LoadHistory` for date-stamped snapshots (multiple snapshots coexist)
+- ✅ Implemented `Cleanup(keepDays)` for retention policy
+- ✅ Implemented `ListSnapshots()` and `SetActive(date)` for historical queries
+- ✅ Added `BackfillSnapshots` function for historical data reconstruction
+- ✅ Added `scanner backfill` CLI command with configurable retention
+- ✅ Added `SCANNER_SNAPSHOT_RETENTION_DAYS` (default 90) and `SCANNER_BACKFILL_DAYS` config
+- ✅ Added tests for snapshot history, cleanup, and date switching
 
 ### 8. Additional API Endpoints
-- ⏳ `GET /api/v1/scan` - run ad-hoc study
-- ⏳ `POST /api/v1/scan` - run study with JSON body
-- ⏳ `GET /api/v1/studies` - list saved studies
-- ⏳ `POST /api/v1/studies` - create study
-- ⏳ `GET /api/v1/studies/{id}` - get study
-- ⏳ `PUT /api/v1/studies/{id}` - update study
-- ⏳ `DELETE /api/v1/studies/{id}` - delete study
-- ⏳ `GET /api/v1/universe` - list symbols
-- ⏳ `GET /api/v1/symbols/{symbol}` - get symbol data
-- ⏳ `GET /api/v1/snapshots` - list historical snapshots
+- ✅ `GET /api/v1/scan` - run ad-hoc study (query params)
+- ✅ `POST /api/v1/scan` - run study with JSON body
+- ✅ `GET /api/v1/studies` - list saved studies
+- ✅ `POST /api/v1/studies` - create study
+- ✅ `GET /api/v1/studies/{id}` - get study by key
+- ✅ `PUT /api/v1/studies/{id}` - update study
+- ✅ `DELETE /api/v1/studies/{id}` - delete study
+- ✅ `GET /api/v1/universe` - list symbols
+- ✅ `GET /api/v1/symbols/{symbol}` - get symbol data (recent bars)
+- ✅ `GET /api/v1/snapshots` - list historical snapshot dates
+- ✅ Updated `NewHandlerWithDeps` to inject studies and store dependencies
+- ✅ Added comprehensive tests for all new endpoints
 
 ## Next Steps (Priority Order)
 
-1. **Expand indicator set** - Implement the additional indicators (EMA, MACD, ATR, Bollinger, etc.)
-2. **Add schema versioning** - Prevent breaking changes from upstream
-3. **Implement snapshot history** - Enable backtesting and audit trail
-4. **Complete API endpoints** - Full REST API for programmatic access
+1. **Schema versioning** - Blocked on pipeline-side implementation (see `docs/TICKET-PIPELINE-SCHEMA-VERSIONING.md`)
+2. **Historical scan endpoint** - Add `date` query param to `/api/v1/scan` for backtesting
+3. **Symbol detail endpoint** - Expand `/api/v1/symbols/{symbol}` to include full snapshot row
+4. **Rate limiting** - Implement tier-based rate limiting (free: 100/min, pro: 1000/min)
 
 ## Testing
 
