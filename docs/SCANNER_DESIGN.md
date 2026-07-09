@@ -148,14 +148,18 @@ binary, `modernc.org/sqlite` the only dep — matching the pipeline and the repo
 
 ## 7. Future convergence (kept open, not built)
 
-The scanner is independent **for now**. Two convergence points are deliberately
+The scanner is independent **for now**. Three convergence points are deliberately
 left cheap:
 
-1. **Shared DSL vocabulary.** Indicator names (`SMA`, `RSI`, `MACD`…) and cross
+1. **API / MCP interface.** `snapshot.Run()` is the uniform execution seam. A REST
+   API, MCP server, or gRPC endpoint is just a new adapter over the same core —
+   no rewrite needed. The snapshot + study compiler + registry are already
+   decoupled from the web UI.
+2. **Shared DSL vocabulary.** Indicator names (`SMA`, `RSI`, `MACD`…) and cross
    semantics match `trading-engine-go`'s **TradeScript**. A scan study is the
    predicate-half of a strategy; when we unify, the screen predicates map onto
    TradeScript without re-authoring.
-2. **Backtest-the-screen (paid tier).** The differentiator. When built, it replays
+3. **Backtest-the-screen (paid tier).** The differentiator. When built, it replays
    a screen forward from a past date `D` — the *same* snapshot projection, just at a
    historical index — over full per-symbol history. That's where the in-RAM history
    load and (potentially) the engine's TradeGrid/Cursor substrate come back in,
@@ -166,7 +170,73 @@ standalone.
 
 ---
 
-## 8. Ethos alignment
+## 8. Runtime lifecycle — 24/7 daemon
+
+The scanner runs as a long-lived process (`scanner serve`), not a batch job. The
+snapshot is built once on startup, held hot in RAM, and serves all requests with
+sub-2ms SELECTs.
+
+```
+STARTUP
+  build snapshot from latest cetus data
+  assign snapshot_id (immutable for its lifetime)
+  serve web + API requests
+
+REBUILD (when new EOD data lands)
+  trigger: schedule (cron/systemd ~4:30 PM ET) or admin endpoint
+  rebuild snapshot with new snapshot_id
+  cached results keyed on old snapshot_id become stale
+  new queries use fresh snapshot
+```
+
+**Combined server architecture:** the scanner and web server run in the same
+process. The snapshot lives in shared memory; web handlers call `snapshot.Run()`
+directly. No network hop, no serialization overhead.
+
+**Future interface expansion:** the current web dashboard is one entry point. The
+same `snapshot.Run()` seam supports additional interfaces without rewriting:
+- **REST API** — HTTP handlers returning JSON (same core, different response format)
+- **MCP server** — tool definitions wrapping `snapshot.Run()` for AI agents
+- **gRPC** — high-throughput inter-service calls (if needed later)
+
+The snapshot + study compiler + registry are already decoupled from the web UI.
+Adding API/MCP is just new adapters over the same core.
+
+---
+
+## 9. Deployment architecture — local → tunnel → public
+
+**Phase 1 (now): local hosting**
+- Run on a modest box (4-core, 32GB RAM is plenty — snapshot is ~3MB)
+- Access via `localhost:8080` or LAN (`0.0.0.0:8080`)
+- Iterate fast, test against real cetus data, validate workflow
+
+**Phase 2: unadvertised Cloudflare tunnel**
+- Expose via Cloudflare tunnel (no open ports on the host)
+- Unadvertised subdomain (e.g., `scanner.chartgeometry.com` or off elko.ai/darkfabrik.ai)
+- Not indexed, not public — share URL only with known testers
+- Built-in login (`SCANNER_AUTH_MODE=login`) for small test group
+- Acceptable interim risk: tunnel URL is the first gate, passwords are PBKDF2-SHA256
+
+**Phase 3: production auth**
+- **Option A: Caddy + caddy-security** — Caddy as reverse proxy, handles login/OAuth/SSO,
+  forwards JWT to scanner in proxy mode. You control the auth stack, works with any
+  identity provider, no vendor lock-in.
+- **Option B: Cloudflare Access** — SSO/MFA at the edge, scanner verifies Access JWT.
+  Simpler ops, but Cloudflare-dependent.
+
+Both options use the scanner's existing `SCANNER_AUTH_MODE=proxy` + JWT verification
+(`authjwt` package). Migration is a config change + restart, not a rewrite.
+
+**Container strategy:** Docker (already have Dockerfile + compose). Distroless-nonroot
+(uid 65532), read-only cetus.db mount, minimal attack surface. LXD is heavier unless
+you're already running LXD clusters.
+
+See [`DEPLOY-cloudflare.md`](DEPLOY-cloudflare.md) for the full deployment playbook.
+
+---
+
+## 10. Ethos alignment
 
 Pure Go / zero CGO, single static binary, `modernc.org/sqlite` only. Indicators stay
 pure and data-driven — windows are config, never hardcoded. Read cetus read-only.

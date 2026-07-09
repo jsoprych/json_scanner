@@ -17,7 +17,12 @@ import (
 )
 
 // DB is a snapshot store.
-type DB struct{ db *sql.DB }
+type DB struct {
+	db           *sql.DB
+	snapshotID   string
+	symbolCount  int
+	snapshotDate int64
+}
 
 // Open opens a snapshot DB; path "" (or ":memory:") uses an in-memory DB. A single
 // connection is pinned so an in-memory table survives for the DB's lifetime.
@@ -78,7 +83,32 @@ func (d *DB) Load(rows []screen.SnapshotRow, ts int64) error {
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	// Update metadata
+	d.snapshotDate = ts
+	d.symbolCount = len(rows)
+	d.snapshotID = fmt.Sprintf("%d", ts)
+
+	return nil
+}
+
+// Metadata returns snapshot metadata for API responses.
+func (d *DB) Metadata() Metadata {
+	return Metadata{
+		SnapshotID:  d.snapshotID,
+		SymbolCount: d.symbolCount,
+		SnapshotDate: d.snapshotDate,
+	}
+}
+
+// Metadata holds snapshot metadata.
+type Metadata struct {
+	SnapshotID   string `json:"snapshot_id"`
+	SymbolCount  int    `json:"symbol_count"`
+	SnapshotDate int64  `json:"snapshot_date"`
 }
 
 // nz maps NaN → nil (SQL NULL).

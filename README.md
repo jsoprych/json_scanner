@@ -208,6 +208,20 @@ internal/telemetry/   slog JSON logger (stderr)
 docs/                 PHASE1_MVP · INDICATORS · SCANNER_DESIGN · AGENTS
 ```
 
+## Deployment
+
+The scanner runs as a 24/7 daemon (`scanner serve`). The snapshot is built once on
+startup, held hot in RAM, and serves all requests with sub-2ms SELECTs.
+
+**Deployment phases:**
+
+1. **Local hosting** — `localhost:8080` or LAN access, iterate fast
+2. **Unadvertised tunnel** — Cloudflare tunnel + built-in login for small test group
+3. **Production auth** — Caddy + caddy-security or Cloudflare Access for public use
+
+See [`docs/DEPLOY-cloudflare.md`](docs/DEPLOY-cloudflare.md) for the full deployment
+roadmap, container strategy, and auth migration path.
+
 ## Development
 
 ```bash

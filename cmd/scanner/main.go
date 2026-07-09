@@ -29,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	"cetus-marketdata-scanner/internal/api"
 	"cetus-marketdata-scanner/internal/authjwt"
 	"cetus-marketdata-scanner/internal/config"
 	"cetus-marketdata-scanner/internal/dashboard"
@@ -450,9 +451,14 @@ func runStudies(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	studies := study.Accessible(all, u)
 
 	since := time.Now().UTC().AddDate(0, 0, -cfg.DigestLookbackDays).Unix()
+	
+	// Phase 1: Load bars + compute indicators
+	t0 := time.Now()
 	res := scan.Universe(ctx, st, universe, scan.Options{
 		Since: since, MinDollarVol: 0, Workers: cfg.DigestWorkers, // studies decide liquidity
 	}, log)
+	t1 := time.Now()
+	log.Info("scan complete", "symbols", len(res.Rows), "duration", t1.Sub(t0).String())
 
 	// The scanner's OWN store — never the cetus warehouse.
 	snap, err := snapshot.Open(cfg.StoreDB)
@@ -461,10 +467,17 @@ func runStudies(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		os.Exit(1)
 	}
 	defer snap.Close()
+	
+	// Phase 2: Materialize snapshot into SQLite
+	t2 := time.Now()
 	if err := snap.Load(res.Rows, res.Day.Unix()); err != nil {
 		log.Error("materialize snapshot failed", "error", err)
 		os.Exit(1)
 	}
+	t3 := time.Now()
+	log.Info("snapshot materialized", "rows", len(res.Rows), "duration", t3.Sub(t2).String())
+	
+	log.Info("total snapshot build", "scan_duration", t1.Sub(t0).String(), "materialize_duration", t3.Sub(t2).String(), "total_duration", t3.Sub(t0).String())
 
 	switch cfg.StudiesFormat {
 	case "jsonl":
@@ -1129,6 +1142,10 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		}
 		page(w, r, false, func(m *dashboard.Model, out io.Writer) error { return m.IndexHTML(out) })
 	})
+
+	// REST API v1 - mount the API handler
+	apiHandler := api.NewHandler(snap, log)
+	mux.Handle("/api/v1/", apiHandler.Router())
 
 	// Bind first, so a port collision fails immediately with a clear error instead of
 	// after a misleading "serving" log.
