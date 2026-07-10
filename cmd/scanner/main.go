@@ -29,8 +29,10 @@ import (
 	"syscall"
 	"time"
 
+	"cetus-marketdata-scanner/internal/alert"
 	"cetus-marketdata-scanner/internal/api"
 	"cetus-marketdata-scanner/internal/authjwt"
+	"cetus-marketdata-scanner/internal/backtest"
 	"cetus-marketdata-scanner/internal/config"
 	"cetus-marketdata-scanner/internal/dashboard"
 	"cetus-marketdata-scanner/internal/digest"
@@ -612,6 +614,11 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	studyStore, err := study.OpenStore(cfg.StudiesPath)
 	if err != nil {
 		log.Error("open studies failed", "path", cfg.StudiesPath, "error", err)
+		os.Exit(1)
+	}
+	subStore, err := study.OpenSubscriptionStore(cfg.SubscriptionsPath)
+	if err != nil {
+		log.Error("open subscriptions failed", "path", cfg.SubscriptionsPath, "error", err)
 		os.Exit(1)
 	}
 	if cfg.AuthMode != authModeLogin && cfg.AuthMode != authModeProxy {
@@ -1209,7 +1216,14 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	})
 
 	// REST API v1 - mount the API handler with full dependencies
-	apiHandler := api.NewHandlerWithDeps(snap, studyStore, st, log)
+	var apiSigner *authjwt.Signer
+	if cfg.JWTSignSecret != "" {
+		apiSigner = authjwt.NewHMACSigner([]byte(cfg.JWTSignSecret), cfg.JWTIssuer, time.Duration(cfg.JWTSignTTLHours)*time.Hour)
+		log.Info("JWT signing enabled for API login endpoint")
+	}
+	detector := alert.NewDetector(snap)
+	backtestEngine := backtest.NewEngine(snap)
+	apiHandler := api.NewHandlerFull(snap, studyStore, st, users, subStore, detector, backtestEngine, apiSigner, jwtVer, log)
 	mux.Handle("/api/v1/", apiHandler.Router())
 
 	// Bind first, so a port collision fails immediately with a clear error instead of

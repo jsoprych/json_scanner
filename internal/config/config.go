@@ -59,13 +59,15 @@ type Config struct {
 	TrustedUserHeader string
 	// JWT verification for proxy mode. When a key is set (HMAC secret or RSA pubkey
 	// file), the identity is taken from a verified token instead of a raw header.
-	JWTHeader     string // header carrying the token (Bearer prefix stripped)
-	JWTJWKSURL    string // JWKS endpoint (rotating RSA keys, e.g. Cloudflare Access)
-	JWTHMACSecret string // HS256/384/512 shared secret
-	JWTPubKeyFile string // RS256/384/512 RSA public key (PEM)
-	JWTUserClaim  string // claim holding the user id (default "sub")
-	JWTIssuer     string // optional expected iss
-	JWTAudience   string // optional expected aud
+	JWTHeader         string // header carrying the token (Bearer prefix stripped)
+	JWTJWKSURL        string // JWKS endpoint (rotating RSA keys, e.g. Cloudflare Access)
+	JWTHMACSecret     string // HS256/384/512 shared secret (verify only)
+	JWTPubKeyFile     string // RS256/384/512 RSA public key (PEM) (verify only)
+	JWTUserClaim      string // claim holding the user id (default "sub")
+	JWTIssuer         string // optional expected iss
+	JWTAudience       string // optional expected aud
+	JWTSignSecret     string // HS256 shared secret for issuing tokens (login endpoint)
+	JWTSignTTLHours   int    // token lifetime in hours (default 24)
 
 	// AnomalyFormat is the `anomalies` output: text (default) | jsonl.
 	AnomalyFormat string
@@ -84,6 +86,8 @@ type Config struct {
 	FreeStudyQuota int
 	// UsersPath is the JSONL user registry (id, tier, role).
 	UsersPath string
+	// SubscriptionsPath is the JSONL of user-study subscriptions.
+	SubscriptionsPath string
 	// User is the acting user id — resolved against UsersPath; tier/role gate access.
 	User string
 
@@ -152,6 +156,8 @@ func Load() Config {
 		JWTUserClaim:      envOr("SCANNER_JWT_USER_CLAIM", "sub"),
 		JWTIssuer:         envOr("SCANNER_JWT_ISSUER", ""),
 		JWTAudience:       envOr("SCANNER_JWT_AUDIENCE", ""),
+		JWTSignSecret:     envOr("SCANNER_JWT_SIGN_SECRET", ""),
+		JWTSignTTLHours:   envInt("SCANNER_JWT_SIGN_TTL_HOURS", 24),
 
 		AnomalyFormat: envOr("SCANNER_ANOMALY_FORMAT", "text"),
 
@@ -163,6 +169,7 @@ func Load() Config {
 		StudiesFormat: envOr("SCANNER_STUDIES_FORMAT", "text"),
 		FreeStudyQuota: envInt("SCANNER_FREE_STUDY_QUOTA", 3),
 		UsersPath:      envOr("SCANNER_USERS_PATH", "users.jsonl"),
+		SubscriptionsPath: envOr("SCANNER_SUBSCRIPTIONS_PATH", "subscriptions.jsonl"),
 		User:           envOr("SCANNER_USER", "global"),
 
 		// Snapshot history: keep 90 days by default, backfill 0 (opt-in).

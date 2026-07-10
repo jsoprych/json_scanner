@@ -80,14 +80,68 @@
 - ✅ `GET /api/v1/universe` - list symbols
 - ✅ `GET /api/v1/symbols/{symbol}` - get symbol data (recent bars)
 - ✅ `GET /api/v1/snapshots` - list historical snapshot dates
-- ✅ Updated `NewHandlerWithDeps` to inject studies and store dependencies
+- ✅ Updated `NewHandlerFull` to inject all dependencies
 - ✅ Added comprehensive tests for all new endpoints
+
+### 9. Tier-1 Headless Scanner (Complete)
+- ✅ **JWT Authentication** - Stateless auth for PWA compatibility
+  - `POST /api/v1/auth/login` - authenticate and receive JWT token
+  - `GET /api/v1/auth/me` - get current user from token
+  - Configurable TTL via `SCANNER_JWT_SIGN_SECRET` and `SCANNER_JWT_SIGN_TTL_HOURS`
+  
+- ✅ **User Management API** - Full CRUD endpoints
+  - `GET /api/v1/users` - list users (admin only)
+  - `POST /api/v1/users` - create user (admin only)
+  - `GET /api/v1/users/{id}` - get user (admin or self)
+  - `PUT /api/v1/users/{id}` - update user (admin or self for limited fields)
+  - `DELETE /api/v1/users/{id}` - delete user (admin only)
+  
+- ✅ **Study Subscriptions** - Users can follow studies
+  - `POST /api/v1/studies/{id}/subscribe` - subscribe to study
+  - `DELETE /api/v1/studies/{id}/subscribe` - unsubscribe
+  - `GET /api/v1/subscriptions` - list user's subscriptions
+  - `GET /api/v1/studies/{id}/subscribed` - check subscription status
+  - `GET /api/v1/studies/{id}/subscribers` - list subscribers (admin only)
+  
+- ✅ **Entry/Exit Detection** - Core alert engine
+  - Detects when symbols enter/exit study matches between snapshots
+  - `GET /api/v1/studies/{id}/alerts` - get entries and exits
+  - `GET /api/v1/studies/{id}/entries` - entries only
+  - `GET /api/v1/studies/{id}/exits` - exits only
+  - Configurable date range for comparison
+  
+- ✅ **Historical Query API** - Point-in-time backtesting
+  - `GET /api/v1/studies/{id}/backtest` - full backtest with summary stats
+  - `GET /api/v1/studies/{id}/pointintime` - run study on specific date
+  - Calculate forward returns (5d, 20d, 60d)
+  - Win rate, avg return, total return metrics
+  
+- ✅ **AI Research Brainstorming** - Phase 2 roadmap
+  - Created `docs/AI_RESEARCH_BRAINSTORM.md`
+  - 6 independent research modules (regime detection, similarity search, historical analogs, NL→SQL, advisor, explainable signals)
+  - Proprietary concepts (market temperature, momentum gravity, volatility compression, correlation clusters, regime shift signals, breadth divergence, relative strength)
+  - Visualization layer (heat maps, regime timeline, correlation clusters, lava-lamp regime flows)
+  - Audio layer concepts (regime-specific tones, ambient sounds)
+  - Newsletter strategy (free → paid → app conversion)
+  - Technical decisions (no vector DB, LLM costs ~$1.80/month, storage estimates)
+  - Implementation roadmap (9-15 weeks, prioritized by bang-for-buck)
 
 ## Next Steps (Priority Order)
 
-1. **Schema versioning** - Blocked on pipeline-side implementation (see `docs/TICKET-PIPELINE-SCHEMA-VERSIONING.md`)
-2. **Historical scan endpoint** - Add `date` query param to `/api/v1/scan` for backtesting
-3. **Symbol detail endpoint** - Expand `/api/v1/symbols/{symbol}` to include full snapshot row
+1. **PWA UI Development** - Build the Progressive Web App interface
+   - Study editor with live preview
+   - Dashboard with market overview
+   - User profile and subscription management
+   - Alert notifications (entries/exits)
+   - Backtest results visualization
+   
+2. **Schema versioning** - Blocked on pipeline-side implementation (see `docs/TICKET-PIPELINE-SCHEMA-VERSIONING.md`)
+
+3. **AI Module Implementation** - After PWA is stable (see `docs/AI_RESEARCH_BRAINSTORM.md`)
+   - Start with regime detection (quick win, 1-2 weeks)
+   - Then historical analogs/backtesting (highest value, 2-3 weeks)
+   - Then NL→SQL (accessibility, 1-2 weeks)
+
 4. **Rate limiting** - Implement tier-based rate limiting (free: 100/min, pro: 1000/min)
 
 ## Testing

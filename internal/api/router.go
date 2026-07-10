@@ -26,12 +26,39 @@ func (h *Handler) Router() http.Handler {
 	mux.HandleFunc("PUT /api/v1/studies/{id}", h.UpdateStudy)
 	mux.HandleFunc("DELETE /api/v1/studies/{id}", h.DeleteStudy)
 
+	// Study subscriptions
+	mux.HandleFunc("GET /api/v1/subscriptions", h.Subscriptions)
+	mux.HandleFunc("POST /api/v1/studies/{id}/subscribe", h.Subscribe)
+	mux.HandleFunc("DELETE /api/v1/studies/{id}/subscribe", h.Unsubscribe)
+	mux.HandleFunc("GET /api/v1/studies/{id}/subscribed", h.IsSubscribed)
+	mux.HandleFunc("GET /api/v1/studies/{id}/subscribers", h.StudySubscribers)
+
+	// Alert detection (entries/exits)
+	mux.HandleFunc("GET /api/v1/studies/{id}/alerts", h.Alerts)
+	mux.HandleFunc("GET /api/v1/studies/{id}/entries", h.Entries)
+	mux.HandleFunc("GET /api/v1/studies/{id}/exits", h.Exits)
+
+	// Backtest (historical queries)
+	mux.HandleFunc("GET /api/v1/studies/{id}/backtest", h.Backtest)
+	mux.HandleFunc("GET /api/v1/studies/{id}/pointintime", h.PointInTime)
+
 	// Universe & symbols
 	mux.HandleFunc("GET /api/v1/universe", h.Universe)
 	mux.HandleFunc("GET /api/v1/symbols/{symbol}", h.Symbol)
 
 	// Snapshot history
 	mux.HandleFunc("GET /api/v1/snapshots", h.Snapshots)
+
+	// Auth endpoints
+	mux.HandleFunc("POST /api/v1/auth/login", h.Login)
+	mux.HandleFunc("GET /api/v1/auth/me", h.Me)
+
+	// User management (admin)
+	mux.HandleFunc("GET /api/v1/users", h.ListUsers)
+	mux.HandleFunc("POST /api/v1/users", h.CreateUser)
+	mux.HandleFunc("GET /api/v1/users/{id}", h.GetUser)
+	mux.HandleFunc("PUT /api/v1/users/{id}", h.UpdateUser)
+	mux.HandleFunc("DELETE /api/v1/users/{id}", h.DeleteUser)
 
 	return mux
 }

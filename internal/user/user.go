@@ -281,6 +281,9 @@ func (s *Store) mutate(id string, fn func(*User)) error {
 // SetDisabled disables/enables a user.
 func (s *Store) SetDisabled(id string, d bool) error { return s.mutate(id, func(u *User) { u.Disabled = d }) }
 
+// SetName changes a user's display name.
+func (s *Store) SetName(id, name string) error { return s.mutate(id, func(u *User) { u.Name = name }) }
+
 // SetTier changes a user's subscription tier.
 func (s *Store) SetTier(id string, t Tier) error { return s.mutate(id, func(u *User) { u.Tier = t }) }
 
