@@ -11,10 +11,11 @@ import (
 	"database/sql"
 	"fmt"
 	"runtime"
+	"time"
 
 	"cetus-marketdata-scanner/internal/model"
 
-	_ "modernc.org/sqlite" // pure-Go driver, matching the pipeline
+	_ "modernc.org/sqlite"
 )
 
 // Store wraps a read-only handle to the cetus warehouse.
@@ -247,6 +248,19 @@ func (s *Store) Stats(ctx context.Context) (OpsStats, error) {
 		}
 	}
 	return out, nil
+}
+
+// LatestBarDate returns the most recent trading date in the warehouse.
+func (s *Store) LatestBarDate(ctx context.Context) (time.Time, error) {
+	var maxTs int64
+	err := s.db.QueryRowContext(ctx, "SELECT MAX(timestamp) FROM "+s.bars).Scan(&maxTs)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("query latest bar date: %w", err)
+	}
+	if maxTs == 0 {
+		return time.Time{}, fmt.Errorf("warehouse has no bars")
+	}
+	return time.Unix(maxTs, 0).UTC(), nil
 }
 
 // LoadAdjustedBars returns best-corrected, split-adjusted, quality-gated daily bars

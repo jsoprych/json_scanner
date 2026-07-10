@@ -1,101 +1,29 @@
-// Command scanner reads the cetus warehouse (read-only) and detects signals.
-//
-// Two modes:
-//
-//	scanner            # default: stream per-symbol signals as JSONL on stdout
-//	scanner scan       #   (explicit alias of the above)
-//	scanner digest     # daily post-close digest (HTML|text|json) — the free-tier report
-//
-// Logs go to stderr so stdout carries only the output stream. Configuration is via
-// environment variables (see README / docs/PHASE1_MVP.md).
 package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"math"
-	"net"
-	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
-	"cetus-marketdata-scanner/internal/alert"
-	"cetus-marketdata-scanner/internal/api"
-	"cetus-marketdata-scanner/internal/authjwt"
-	"cetus-marketdata-scanner/internal/backtest"
 	"cetus-marketdata-scanner/internal/config"
-	"cetus-marketdata-scanner/internal/dashboard"
 	"cetus-marketdata-scanner/internal/digest"
-	"cetus-marketdata-scanner/internal/predicate"
 	"cetus-marketdata-scanner/internal/scan"
 	"cetus-marketdata-scanner/internal/scanner"
-	"cetus-marketdata-scanner/internal/screen"
 	"cetus-marketdata-scanner/internal/sentinel"
+	"cetus-marketdata-scanner/internal/serve"
 	"cetus-marketdata-scanner/internal/snapshot"
 	"cetus-marketdata-scanner/internal/store"
 	"cetus-marketdata-scanner/internal/study"
 	"cetus-marketdata-scanner/internal/telemetry"
 	"cetus-marketdata-scanner/internal/user"
-)
-
-// --- session store (in-memory; opaque random tokens) ---
-
-const sessionCookie = "cetus_session"
-
-type sessionStore struct {
-	mu sync.Mutex
-	m  map[string]sessionEntry
-}
-
-type sessionEntry struct {
-	uid string
-	exp time.Time
-}
-
-func newSessionStore() *sessionStore { return &sessionStore{m: map[string]sessionEntry{}} }
-
-func (s *sessionStore) create(uid string, ttl time.Duration) string {
-	b := make([]byte, 32)
-	rand.Read(b)
-	tok := hex.EncodeToString(b)
-	s.mu.Lock()
-	s.m[tok] = sessionEntry{uid, time.Now().Add(ttl)}
-	s.mu.Unlock()
-	return tok
-}
-
-func (s *sessionStore) get(tok string) (string, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	e, ok := s.m[tok]
-	if !ok || time.Now().After(e.exp) {
-		if ok {
-			delete(s.m, tok)
-		}
-		return "", false
-	}
-	return e.uid, true
-}
-
-func (s *sessionStore) delete(tok string) {
-	s.mu.Lock()
-	delete(s.m, tok)
-	s.mu.Unlock()
-}
-
-const (
-	authModeLogin = "login" // built-in login + sessions (standalone/dev)
-	authModeProxy = "proxy" // trust an identity header from a reverse proxy (caddy-security)
 )
 
 // studyQuota returns how many studies a user may own (0 = unlimited). Admins and
@@ -107,47 +35,42 @@ func studyQuota(u user.User, cfg config.Config) int {
 	return cfg.FreeStudyQuota
 }
 
-// atoiOr parses s as an int, returning def on failure.
-func atoiOr(s string, def int) int {
-	if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
-		return n
-	}
-	return def
-}
-
-// splitCSV parses a comma-separated list into trimmed, non-empty items.
-func splitCSV(s string) []string {
-	var out []string
-	for _, p := range strings.Split(s, ",") {
-		if t := strings.TrimSpace(p); t != "" {
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
-// isLoopback reports whether a listen address binds only the loopback interface.
-func isLoopback(addr string) bool {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		host = addr
-	}
-	switch host {
-	case "", "0.0.0.0", "::":
-		return false
-	case "localhost":
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
-}
-
 func main() {
 	log := telemetry.New(os.Stderr) // logs → stderr, output → stdout
 	cfg := config.Load()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// Parse flags
+	var studyFile string
+	var outputFormat string
+	var forceRescan bool
+	if len(os.Args) > 1 {
+		for i := 1; i < len(os.Args); i++ {
+			if os.Args[i] == "--study" && i+1 < len(os.Args) {
+				studyFile = os.Args[i+1]
+				// Remove --study and its value from args
+				os.Args = append(os.Args[:i], os.Args[i+2:]...)
+				i-- // Adjust index since we removed elements
+			} else if os.Args[i] == "--format" && i+1 < len(os.Args) {
+				outputFormat = os.Args[i+1]
+				// Remove --format and its value from args
+				os.Args = append(os.Args[:i], os.Args[i+2:]...)
+				i-- // Adjust index since we removed elements
+			} else if os.Args[i] == "--force" {
+				forceRescan = true
+				// Remove --force from args
+				os.Args = append(os.Args[:i], os.Args[i+1:]...)
+				i-- // Adjust index since we removed elements
+			}
+		}
+	}
+
+	// Override config format if flag provided
+	if outputFormat != "" {
+		cfg.StudiesFormat = outputFormat
+	}
 
 	sub := ""
 	if len(os.Args) > 1 {
@@ -163,7 +86,7 @@ func main() {
 	case "anomalies":
 		runAnomalies(ctx, log, cfg)
 	case "studies":
-		runStudies(ctx, log, cfg)
+		runStudies(ctx, log, cfg, studyFile, forceRescan)
 	case "users":
 		runUsers(log, cfg)
 	case "backfill":
@@ -451,28 +374,22 @@ func runAnomalies(ctx context.Context, log *slog.Logger, cfg config.Config) {
 
 // runStudies materializes the snapshot into the scanner's OWN store (in-memory by
 // default) and runs the acting user's tier-accessible SQL-WHERE studies against it.
-func runStudies(ctx context.Context, log *slog.Logger, cfg config.Config) {
-	st, universe := openUniverse(ctx, log, cfg)
-	defer st.Close()
+// If a recent snapshot exists in the store, it reuses it instead of rescanning.
+func runStudies(ctx context.Context, log *slog.Logger, cfg config.Config, studyFile string, forceRescan bool) {
+	// Use provided study file or fall back to config
+	studiesPath := cfg.StudiesPath
+	if studyFile != "" {
+		studiesPath = studyFile
+	}
 
-	all, err := study.LoadFile(cfg.StudiesPath)
+	all, err := study.LoadFile(studiesPath)
 	if err != nil {
-		log.Error("load studies failed", "path", cfg.StudiesPath, "error", err)
+		log.Error("load studies failed", "path", studiesPath, "error", err)
 		os.Exit(1)
 	}
 	// Acting user resolved from the registry; tier/role gate which studies run.
 	u := actingUser(log, cfg)
 	studies := study.Accessible(all, u)
-
-	since := time.Now().UTC().AddDate(0, 0, -cfg.DigestLookbackDays).Unix()
-	
-	// Phase 1: Load bars + compute indicators
-	t0 := time.Now()
-	res := scan.Universe(ctx, st, universe, scan.Options{
-		Since: since, MinDollarVol: 0, Workers: cfg.DigestWorkers, // studies decide liquidity
-	}, log)
-	t1 := time.Now()
-	log.Info("scan complete", "symbols", len(res.Rows), "duration", t1.Sub(t0).String())
 
 	// The scanner's OWN store — never the cetus warehouse.
 	snap, err := snapshot.Open(cfg.StoreDB)
@@ -481,17 +398,102 @@ func runStudies(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		os.Exit(1)
 	}
 	defer snap.Close()
-	
-	// Phase 2: Materialize snapshot into SQLite
-	t2 := time.Now()
-	if err := snap.Load(res.Rows, res.Day.Unix()); err != nil {
-		log.Error("materialize snapshot failed", "error", err)
-		os.Exit(1)
+
+	// Check if we have a recent snapshot (within last 24 hours)
+	t0 := time.Now()
+	dates, err := snap.ListSnapshots()
+	if err != nil {
+		// Table doesn't exist yet - that's fine, we'll create it with a full scan
+		log.Debug("no existing snapshots found", "error", err)
+		dates = nil
 	}
-	t3 := time.Now()
-	log.Info("snapshot materialized", "rows", len(res.Rows), "duration", t3.Sub(t2).String())
-	
-	log.Info("total snapshot build", "scan_duration", t1.Sub(t0).String(), "materialize_duration", t3.Sub(t2).String(), "total_duration", t3.Sub(t0).String())
+
+	var snapshotDate int64
+	var symbolsScanned, symbolsEligible int
+	var scanDuration time.Duration
+
+	// Use existing snapshot if available (unless --force is set)
+	if len(dates) > 0 && !forceRescan {
+		latestDate := dates[0] // ListSnapshots returns newest first
+		age := time.Since(time.Unix(latestDate, 0))
+		
+		// Always reuse the latest available snapshot
+		snapshotTime := time.Unix(latestDate, 0)
+		log.Info("reusing existing snapshot", "date", snapshotTime.Format("2006-01-02"), "age", age.Round(time.Hour))
+		
+		// Warn if snapshot is stale (more than 1 day old)
+		if age > 24*time.Hour {
+			daysOld := int(age.Hours() / 24)
+			fmt.Printf("\n⚠️  WARNING: Snapshot is %d days old (latest: %s)\n", daysOld, snapshotTime.Format("2006-01-02"))
+			fmt.Printf("   Run the pipeline to update warehouse data, then use --force to rebuild snapshot\n\n")
+		}
+		
+		if err := snap.SetActive(latestDate); err != nil {
+			log.Error("set active snapshot failed", "error", err)
+			os.Exit(1)
+		}
+		snapshotDate = latestDate
+		// We don't know exact counts without scanning, but we can estimate
+		symbolsScanned = 0 // Unknown for cached snapshot
+		symbolsEligible = 0 // Unknown for cached snapshot
+		scanDuration = 0 // No scan needed
+	}
+
+	// If no recent snapshot, do a full scan
+	if snapshotDate == 0 {
+		st, universe := openUniverse(ctx, log, cfg)
+		defer st.Close()
+
+		since := time.Now().UTC().AddDate(0, 0, -cfg.DigestLookbackDays).Unix()
+		
+		// Phase 1: Load bars + compute indicators
+		res := scan.Universe(ctx, st, universe, scan.Options{
+			Since: since, MinDollarVol: 0, Workers: cfg.DigestWorkers,
+		}, log)
+		t1 := time.Now()
+		log.Info("scan complete", "symbols", len(res.Rows), "duration", t1.Sub(t0).String())
+
+		// Phase 2: Materialize snapshot into SQLite
+		t2 := time.Now()
+		if err := snap.Load(res.Rows, res.Day.Unix()); err != nil {
+			log.Error("materialize snapshot failed", "error", err)
+			os.Exit(1)
+		}
+		t3 := time.Now()
+		log.Info("snapshot materialized", "rows", len(res.Rows), "duration", t3.Sub(t2).String())
+		
+		snapshotDate = res.Day.Unix()
+		symbolsScanned = res.Scanned
+		symbolsEligible = len(res.Rows)
+		scanDuration = t3.Sub(t0)
+	}
+
+	totalDuration := time.Since(t0)
+
+	// Display execution metadata header
+	fmt.Printf("\n")
+	fmt.Printf("═══════════════════════════════════════════════════════════════\n")
+	fmt.Printf("  STUDY EXECUTION METADATA\n")
+	fmt.Printf("═══════════════════════════════════════════════════════════════\n")
+	fmt.Printf("  User:              %s (%s)\n", u.ID, u.Tier)
+	fmt.Printf("  Studies File:      %s\n", studiesPath)
+	fmt.Printf("  Studies Loaded:    %d (accessible: %d)\n", len(all), len(studies))
+	fmt.Printf("  Snapshot Date:     %s\n", time.Unix(snapshotDate, 0).Format("2006-01-02"))
+	if symbolsScanned > 0 {
+		fmt.Printf("  Symbols Scanned:   %d\n", symbolsScanned)
+		fmt.Printf("  Symbols Eligible:  %d\n", symbolsEligible)
+	} else {
+		fmt.Printf("  Symbols:           (cached snapshot)\n")
+	}
+	fmt.Printf("  Store:             %s\n", cfg.StoreDB)
+	if scanDuration > 0 {
+		fmt.Printf("  Scan Duration:     %s\n", scanDuration.Round(time.Millisecond))
+	} else {
+		fmt.Printf("  Scan Duration:     (skipped - using cached)\n")
+	}
+	fmt.Printf("  Total Duration:    %s\n", totalDuration.Round(time.Millisecond))
+	fmt.Printf("═══════════════════════════════════════════════════════════════\n")
+	fmt.Printf("\n")
 
 	switch cfg.StudiesFormat {
 	case "jsonl":
@@ -510,9 +512,100 @@ func runStudies(ctx context.Context, log *slog.Logger, cfg config.Config) {
 				}{s.Owner, s.Key, m})
 			}
 		}
+	case "json":
+		// Rich JSON output with metadata
+		type StudyResult struct {
+			Study  study.Study       `json:"study"`
+			Count  int               `json:"count"`
+			Matches []snapshot.Match `json:"matches"`
+		}
+		
+		type Output struct {
+			Metadata struct {
+				User            string `json:"user"`
+				Tier            string `json:"tier"`
+				SnapshotDate    string `json:"snapshot_date"`
+				SymbolsScanned  int    `json:"symbols_scanned"`
+				SymbolsEligible int    `json:"symbols_eligible"`
+				StudiesFile     string `json:"studies_file"`
+				StudiesLoaded   int    `json:"studies_loaded"`
+				StudiesRun      int    `json:"studies_run"`
+				ScanDuration    string `json:"scan_duration"`
+				TotalDuration   string `json:"total_duration"`
+			} `json:"metadata"`
+			Results []StudyResult `json:"results"`
+		}
+		
+		output := Output{}
+		output.Metadata.User = u.ID
+		output.Metadata.Tier = string(u.Tier)
+		output.Metadata.SnapshotDate = time.Unix(snapshotDate, 0).Format("2006-01-02")
+		output.Metadata.SymbolsScanned = symbolsScanned
+		output.Metadata.SymbolsEligible = symbolsEligible
+		output.Metadata.StudiesFile = studiesPath
+		output.Metadata.StudiesLoaded = len(all)
+		output.Metadata.StudiesRun = len(studies)
+		if scanDuration > 0 {
+			output.Metadata.ScanDuration = scanDuration.Round(time.Millisecond).String()
+		} else {
+			output.Metadata.ScanDuration = "0s (cached)"
+		}
+		output.Metadata.TotalDuration = totalDuration.Round(time.Millisecond).String()
+		
+		for _, s := range studies {
+			matches, err := snap.Run(s)
+			if err != nil {
+				log.Error("run study failed", "study", s.Key, "error", err)
+				continue
+			}
+			output.Results = append(output.Results, StudyResult{
+				Study:   s,
+				Count:   len(matches),
+				Matches: matches,
+			})
+		}
+		
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(output)
+		
+	case "csv":
+		w := csv.NewWriter(os.Stdout)
+		// Write header
+		_ = w.Write([]string{
+			"study_key", "study_title", "study_owner", "study_tier",
+			"symbol", "close", "rsi14", "ret_3m", "dollar_vol",
+		})
+		
+		for _, s := range studies {
+			matches, err := snap.Run(s)
+			if err != nil {
+				log.Error("run study failed", "study", s.Key, "error", err)
+				continue
+			}
+			for _, m := range matches {
+				_ = w.Write([]string{
+					s.Key,
+					s.Title,
+					s.Owner,
+					string(s.Tier),
+					m.Symbol,
+					fmt.Sprintf("%.2f", m.Close),
+					fmt.Sprintf("%.1f", m.RSI14),
+					fmt.Sprintf("%.4f", m.Ret3m),
+					fmt.Sprintf("%.0f", m.DollarVol),
+				})
+			}
+		}
+		w.Flush()
+		if err := w.Error(); err != nil {
+			log.Error("csv write failed", "error", err)
+			os.Exit(1)
+		}
+		
 	case "text":
 		fmt.Printf("STUDIES — user %s (%s) — %s — snapshot %d symbols · store %s\n\n",
-			u.ID, u.Tier, res.Day.Format("2006-01-02"), len(res.Rows), cfg.StoreDB)
+			u.ID, u.Tier, time.Unix(snapshotDate, 0).Format("2006-01-02"), symbolsEligible, cfg.StoreDB)
 		for _, s := range studies {
 			matches, err := snap.Run(s)
 			if err != nil {
@@ -527,11 +620,11 @@ func runStudies(ctx context.Context, log *slog.Logger, cfg config.Config) {
 			fmt.Println()
 		}
 	default:
-		log.Error("unknown studies format", "format", cfg.StudiesFormat, "want", "text|jsonl")
+		log.Error("unknown studies format", "format", cfg.StudiesFormat, "want", "text|jsonl|json|csv")
 		os.Exit(2)
 	}
 	log.Info("studies complete", "user", u.ID, "tier", u.Tier, "studies", len(studies),
-		"snapshot_rows", len(res.Rows), "store", cfg.StoreDB, "day", res.Day.Format("2006-01-02"))
+		"snapshot_rows", symbolsEligible, "store", cfg.StoreDB, "day", time.Unix(snapshotDate, 0).Format("2006-01-02"))
 }
 
 // runBackfill builds historical snapshots for the past N days and stores them
@@ -560,7 +653,7 @@ func runBackfill(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	log.Info("backfill starting", "days", cfg.BackfillDays, "retention_days", cfg.SnapshotRetentionDays,
 		"symbols", len(universe), "store", cfg.StoreDB)
 
-	backfilled, err := scan.BackfillSnapshots(ctx, st, snap, universe, scan.BackfillOptions{
+	backfilled, err := scan.BackfillSnapshots(ctx, st, st, snap, universe, scan.BackfillOptions{
 		Days:         cfg.BackfillDays,
 		KeepDays:     cfg.SnapshotRetentionDays,
 		MinDollarVol: 0,
@@ -587,664 +680,12 @@ func runBackfill(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		}())
 }
 
-// runServe serves the login + user dashboard (/) + admin console (/admin) with
-// per-session auth. The expensive scan is shared/cached; each request renders the
-// logged-in user's tier-accessible studies. SCANNER_SERVE_ADDR sets the address.
+// runServe starts the HTTP dashboard server.
 func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
-	st, err := store.OpenReadOnly(ctx, cfg.DBPath)
+	srv, err := serve.New(ctx, log, cfg)
 	if err != nil {
-		log.Error("open warehouse failed", "db", cfg.DBPath, "error", err)
+		log.Error("failed to create server", "error", err)
 		os.Exit(1)
 	}
-	defer st.Close()
-
-	// The scanner's OWN store (never cetus) — kept open for the server's lifetime.
-	snap, err := snapshot.Open(cfg.StoreDB)
-	if err != nil {
-		log.Error("open snapshot store failed", "store", cfg.StoreDB, "error", err)
-		os.Exit(1)
-	}
-	defer snap.Close()
-
-	users, err := user.OpenStore(cfg.UsersPath)
-	if err != nil {
-		log.Error("open users failed", "path", cfg.UsersPath, "error", err)
-		os.Exit(1)
-	}
-	studyStore, err := study.OpenStore(cfg.StudiesPath)
-	if err != nil {
-		log.Error("open studies failed", "path", cfg.StudiesPath, "error", err)
-		os.Exit(1)
-	}
-	subStore, err := study.OpenSubscriptionStore(cfg.SubscriptionsPath)
-	if err != nil {
-		log.Error("open subscriptions failed", "path", cfg.SubscriptionsPath, "error", err)
-		os.Exit(1)
-	}
-	if cfg.AuthMode != authModeLogin && cfg.AuthMode != authModeProxy {
-		log.Error("bad SCANNER_AUTH_MODE", "mode", cfg.AuthMode, "want", "login|proxy")
-		os.Exit(2)
-	}
-	// Optional JWT verification for proxy mode (verified token beats a raw header).
-	var jwtVer interface {
-		Verify(string) (string, error)
-	}
-	if cfg.AuthMode == authModeProxy {
-		switch {
-		case cfg.JWTJWKSURL != "":
-			jwtVer = authjwt.NewJWKS(cfg.JWTJWKSURL, cfg.JWTUserClaim, cfg.JWTIssuer, cfg.JWTAudience)
-			log.Info("proxy auth: JWT JWKS verification enabled (rotating RSA keys)", "jwks", cfg.JWTJWKSURL, "header", cfg.JWTHeader, "claim", cfg.JWTUserClaim)
-		case cfg.JWTHMACSecret != "":
-			jwtVer = authjwt.NewHMAC([]byte(cfg.JWTHMACSecret), cfg.JWTUserClaim, cfg.JWTIssuer, cfg.JWTAudience)
-			log.Info("proxy auth: JWT HMAC verification enabled", "header", cfg.JWTHeader, "claim", cfg.JWTUserClaim)
-		case cfg.JWTPubKeyFile != "":
-			pub, err := authjwt.LoadRSAPublicKeyPEM(cfg.JWTPubKeyFile)
-			if err != nil {
-				log.Error("load JWT public key failed", "file", cfg.JWTPubKeyFile, "error", err)
-				os.Exit(1)
-			}
-			jwtVer = authjwt.NewRSA(pub, cfg.JWTUserClaim, cfg.JWTIssuer, cfg.JWTAudience)
-			log.Info("proxy auth: JWT RSA verification enabled", "header", cfg.JWTHeader, "claim", cfg.JWTUserClaim, "key", cfg.JWTPubKeyFile)
-		default:
-			log.Warn("proxy auth: no JWT key set — trusting the raw identity header (weaker). Set SCANNER_JWT_HMAC_SECRET or SCANNER_JWT_PUBKEY_FILE to verify a signed token.")
-		}
-		if !isLoopback(cfg.ServeAddr) && jwtVer == nil {
-			log.Warn("proxy auth on a non-loopback bind with no JWT verification: the identity header is spoofable — bind 127.0.0.1 or configure a JWT key",
-				"addr", cfg.ServeAddr, "header", cfg.TrustedUserHeader)
-		}
-	}
-
-	sessions := newSessionStore()
-	sessTTL := time.Duration(cfg.SessionHours) * time.Hour
-	ttl := time.Duration(cfg.ServeTTLSecs) * time.Second
-
-	// Shared, user-independent scan cache (guarded by mu). Per-user studies run
-	// against the shared snapshot at render time.
-	var (
-		mu      sync.Mutex
-		cAt     time.Time
-		cRows   []screen.SnapshotRow
-		cStats  store.OpsStats
-		cFlags  []sentinel.Flag
-		cSus    int
-		cWat    int
-		cDay    time.Time
-		cMillis int64
-		cSize   int64
-	)
-	refresh := func() error { // caller holds mu
-		start := time.Now()
-		universe, err := resolveUniverse(ctx, log, st, cfg)
-		if err != nil {
-			return err
-		}
-		if cfg.MaxSymbols > 0 && len(universe) > cfg.MaxSymbols {
-			universe = universe[:cfg.MaxSymbols]
-		}
-		since := time.Now().UTC().AddDate(0, 0, -cfg.DigestLookbackDays).Unix()
-		res := scan.Universe(ctx, st, universe, scan.Options{Since: since, MinDollarVol: 0, Workers: cfg.DigestWorkers}, log)
-		if err := snap.Load(res.Rows, res.Day.Unix()); err != nil {
-			return err
-		}
-		cRows, cDay = res.Rows, res.Day
-		cFlags = sentinel.Tier0(res.Rows, sentinel.DefaultTier0())
-		cSus, cWat = sentinel.Counts(cFlags)
-		if s2, e := st.Stats(ctx); e == nil {
-			cStats = s2
-		} else {
-			return e
-		}
-		cSize = 0
-		if fi, e := os.Stat(cfg.DBPath); e == nil {
-			cSize = fi.Size()
-		}
-		cMillis = time.Since(start).Milliseconds()
-		cAt = time.Now()
-		log.Info("scan refreshed", "scanned", res.Scanned, "flagged", len(cFlags), "day", cDay.Format("2006-01-02"))
-		return nil
-	}
-
-	// modelFor builds a per-user model against the shared cache (refresh if stale).
-	modelFor := func(u user.User, force bool) (*dashboard.Model, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		if cRows == nil || time.Since(cAt) >= ttl || force {
-			if err := refresh(); err != nil {
-				return nil, err
-			}
-		}
-		allStudies := studyStore.All()
-		d, err := digest.FromStudies(cDay, cRows, snap, study.Accessible(allStudies, u))
-		if err != nil {
-			return nil, err
-		}
-		var mine []study.Study
-		for _, s := range allStudies {
-			if s.Owner == u.ID {
-				mine = append(mine, s)
-			}
-		}
-		return &dashboard.Model{
-			Acting: u, SessionAuth: cfg.AuthMode == authModeLogin,
-			Stats: cStats, DBSizeBytes: cSize, ScanMillis: cMillis,
-			Digest: d, Flags: cFlags, Suspect: cSus, Watch: cWat,
-			Users: users.All(), Studies: allStudies, MyStudies: mine,
-			StudyQuota: studyQuota(u, cfg),
-		}, nil
-	}
-
-	// preview runs an ad-hoc study against the current snapshot (the editor's Test
-	// button). Shares the scan cache/lock and validates the WHERE by executing it.
-	preview := func(st study.Study) ([]snapshot.Match, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		if cRows == nil || time.Since(cAt) >= ttl {
-			if err := refresh(); err != nil {
-				return nil, err
-			}
-		}
-		return snap.Run(st)
-	}
-
-	sessionUser := func(r *http.Request) (user.User, bool) {
-		c, err := r.Cookie(sessionCookie)
-		if err != nil {
-			return user.User{}, false
-		}
-		uid, ok := sessions.get(c.Value)
-		if !ok {
-			return user.User{}, false
-		}
-		return users.Find(uid)
-	}
-
-	// identify resolves the acting user: from the session cookie (login mode) or from
-	// the reverse proxy's trusted identity header (proxy mode). A proxy-vouched user
-	// with no local profile gets default free/user entitlement.
-	identify := func(r *http.Request) (user.User, bool) {
-		if cfg.AuthMode == authModeProxy {
-			var id string
-			if jwtVer != nil { // verify a signed token
-				tok := strings.TrimSpace(strings.TrimPrefix(r.Header.Get(cfg.JWTHeader), "Bearer "))
-				if tok == "" {
-					return user.User{}, false
-				}
-				uid, err := jwtVer.Verify(tok)
-				if err != nil {
-					log.Warn("jwt verify failed", "error", err)
-					return user.User{}, false
-				}
-				id = uid
-			} else { // trust the raw header (must be loopback-only)
-				id = strings.TrimSpace(r.Header.Get(cfg.TrustedUserHeader))
-			}
-			if id == "" {
-				return user.User{}, false
-			}
-			if u, ok := users.Find(id); ok {
-				return u, true
-			}
-			return user.User{ID: id, Name: id, Tier: user.TierFree, Role: user.RoleUser}, true
-		}
-		return sessionUser(r)
-	}
-
-	// requireUser resolves the acting user or writes the right unauth response.
-	requireUser := func(w http.ResponseWriter, r *http.Request) (user.User, bool) {
-		u, ok := identify(r)
-		if ok {
-			return u, true
-		}
-		if cfg.AuthMode == authModeProxy {
-			w.WriteHeader(http.StatusUnauthorized)
-			fmt.Fprintf(w, "401 — no identity from proxy (missing %s header)\n", cfg.TrustedUserHeader)
-		} else {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
-		}
-		return user.User{}, false
-	}
-
-	page := func(w http.ResponseWriter, r *http.Request, adminOnly bool, render func(*dashboard.Model, io.Writer) error) {
-		u, ok := requireUser(w, r)
-		if !ok {
-			return
-		}
-		if adminOnly && !u.IsAdmin() {
-			w.WriteHeader(http.StatusForbidden)
-			fmt.Fprintf(w, "403 — admin only (you are %s / %s)\n", u.ID, u.Role)
-			return
-		}
-		m, err := modelFor(u, r.URL.Query().Get("refresh") != "")
-		if err != nil {
-			log.Error("render dashboard failed", "error", err)
-			http.Error(w, "scan failed", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := render(m, w); err != nil {
-			log.Error("render page failed", "error", err)
-		}
-	}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
-
-	// Public PWA assets (no auth) — make the dashboard installable / standalone.
-	mux.HandleFunc("/manifest.webmanifest", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/manifest+json")
-		io.WriteString(w, dashboard.Manifest)
-	})
-	mux.HandleFunc("/icon.svg", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "image/svg+xml")
-		io.WriteString(w, dashboard.IconSVG)
-	})
-	mux.HandleFunc("/sw.js", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/javascript")
-		io.WriteString(w, dashboard.ServiceWorker)
-	})
-
-	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
-		if cfg.AuthMode == authModeProxy { // the proxy owns auth
-			http.Redirect(w, r, "/", http.StatusSeeOther)
-			return
-		}
-		if r.Method == http.MethodPost {
-			r.ParseForm()
-			u, ok := users.Find(r.FormValue("user"))
-			if !ok || !u.CheckPassword(r.FormValue("password")) {
-				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				w.WriteHeader(http.StatusUnauthorized)
-				dashboard.Login{Error: "Invalid user or password (or the account is disabled).", Users: users.All()}.HTML(w)
-				return
-			}
-			tok := sessions.create(u.ID, sessTTL)
-			http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: tok, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: int(sessTTL.Seconds())})
-			http.Redirect(w, r, "/", http.StatusSeeOther)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		dashboard.Login{Users: users.All()}.HTML(w)
-	})
-
-	mux.HandleFunc("/logout", func(w http.ResponseWriter, r *http.Request) {
-		if cfg.AuthMode == authModeProxy { // sign-out is handled by the proxy
-			http.Redirect(w, r, "/", http.StatusSeeOther)
-			return
-		}
-		if c, err := r.Cookie(sessionCookie); err == nil {
-			sessions.delete(c.Value)
-		}
-		http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1})
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-	})
-
-	// Admin user CRUD (admin-gated).
-	mux.HandleFunc("/admin/users", func(w http.ResponseWriter, r *http.Request) {
-		u, ok := requireUser(w, r)
-		if !ok {
-			return
-		}
-		if !u.IsAdmin() {
-			w.WriteHeader(http.StatusForbidden)
-			fmt.Fprintln(w, "403 — admin only")
-			return
-		}
-		if r.Method != http.MethodPost {
-			http.Redirect(w, r, "/admin", http.StatusSeeOther)
-			return
-		}
-		r.ParseForm()
-		id := strings.TrimSpace(r.FormValue("id"))
-		var actErr error
-		switch r.FormValue("action") {
-		case "create":
-			nu := user.User{ID: id, Name: r.FormValue("name"), Tier: user.Tier(r.FormValue("tier")), Role: user.Role(r.FormValue("role")), Groups: splitCSV(r.FormValue("groups"))}
-			nu.SetPassword(r.FormValue("password"))
-			actErr = users.Create(nu)
-		case "disable":
-			actErr = users.SetDisabled(id, true)
-		case "enable":
-			actErr = users.SetDisabled(id, false)
-		case "set-pro":
-			actErr = users.SetTier(id, user.TierPro)
-		case "set-free":
-			actErr = users.SetTier(id, user.TierFree)
-		case "set-admin":
-			actErr = users.SetRole(id, user.RoleAdmin)
-		case "set-user":
-			actErr = users.SetRole(id, user.RoleUser)
-		case "set-groups":
-			actErr = users.SetGroups(id, splitCSV(r.FormValue("groups")))
-		case "delete":
-			if id == u.ID {
-				actErr = fmt.Errorf("cannot delete yourself")
-			} else {
-				actErr = users.Delete(id)
-			}
-		default:
-			actErr = fmt.Errorf("unknown action")
-		}
-		if actErr != nil {
-			log.Warn("user admin action failed", "action", r.FormValue("action"), "id", id, "error", actErr)
-		} else {
-			log.Info("user admin action", "action", r.FormValue("action"), "id", id, "by", u.ID)
-		}
-		http.Redirect(w, r, "/admin", http.StatusSeeOther)
-	})
-
-	// Study editor preview: any logged-in user; non-admin clauses are sandbox-checked.
-	mux.HandleFunc("/studies/test", func(w http.ResponseWriter, r *http.Request) {
-		u, ok := requireUser(w, r)
-		if !ok {
-			return
-		}
-		r.ParseForm()
-		where, orderBy := r.FormValue("where"), r.FormValue("order_by")
-		w.Header().Set("Content-Type", "application/json")
-		type resp struct {
-			Count  int      `json:"count"`
-			Sample []string `json:"sample"`
-			Error  string   `json:"error,omitempty"`
-		}
-		if !u.IsAdmin() {
-			if err := study.ValidateClause(where); err != nil {
-				json.NewEncoder(w).Encode(resp{Error: err.Error()})
-				return
-			}
-			if err := study.ValidateClause(orderBy); err != nil {
-				json.NewEncoder(w).Encode(resp{Error: err.Error()})
-				return
-			}
-		}
-		matches, err := preview(study.Study{Where: where, OrderBy: orderBy, Limit: atoiOr(r.FormValue("limit"), 20)})
-		if err != nil {
-			json.NewEncoder(w).Encode(resp{Error: err.Error()})
-			return
-		}
-		sample := make([]string, 0, 12)
-		for i, m := range matches {
-			if i >= 12 {
-				break
-			}
-			sample = append(sample, m.Symbol)
-		}
-		json.NewEncoder(w).Encode(resp{Count: len(matches), Sample: sample})
-	})
-
-	// Structured study editor (docs/ELKO_SCANNER_STUDY_EDITOR_MVP_DESIGN.md): the
-	// browser gets a harmless catalog of labels + legal combinations and only ever
-	// sends opaque IDs. The catalog is static, so marshal it once.
-	catalogBytes, _ := json.Marshal(predicate.BuildCatalog())
-	mux.HandleFunc("/api/scanner/catalog", func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := requireUser(w, r); !ok {
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(catalogBytes)
-	})
-
-	// resultLimit is server-owned (never client-supplied): free tier shows 25 with a
-	// +1 probe for has_more; pro sees more.
-	resultLimit := func(u user.User) int {
-		if u.Tier == user.TierPro || u.IsAdmin() {
-			return 101
-		}
-		return 26
-	}
-
-	// Compile a structured Definition → deterministic SQL and run it as a live
-	// preview. Every ID is re-validated server-side; unknown/hostile IDs are
-	// rejected before any SQL is built, so this is safe on untrusted input.
-	mux.HandleFunc("/api/studies/compile", func(w http.ResponseWriter, r *http.Request) {
-		u, ok := requireUser(w, r)
-		if !ok {
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		type resp struct {
-			Where   string   `json:"where"`
-			OrderBy string   `json:"orderBy"`
-			Hash    string   `json:"hash,omitempty"`
-			Count   int      `json:"count"`
-			Sample  []string `json:"sample"`
-			Error   string   `json:"error,omitempty"`
-		}
-		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			json.NewEncoder(w).Encode(resp{Error: "POST only"})
-			return
-		}
-		dec := json.NewDecoder(io.LimitReader(r.Body, 16<<10))
-		dec.DisallowUnknownFields()
-		var def predicate.Definition
-		if err := dec.Decode(&def); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(resp{Error: "bad request: " + err.Error()})
-			return
-		}
-		compiled, err := predicate.Compile(def, resultLimit(u))
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(resp{Error: err.Error()})
-			return
-		}
-		matches, err := preview(study.Study{Where: compiled.Where, OrderBy: compiled.OrderBy, Limit: resultLimit(u)})
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(resp{Error: err.Error()})
-			return
-		}
-		sample := make([]string, 0, 12)
-		for i, m := range matches {
-			if i >= 12 {
-				break
-			}
-			sample = append(sample, m.Symbol)
-		}
-		json.NewEncoder(w).Encode(resp{
-			Where: compiled.Where, OrderBy: compiled.OrderBy, Hash: compiled.Hash,
-			Count: len(matches), Sample: sample,
-		})
-	})
-
-	// Study editor save/delete. Admins manage any study; regular users manage their
-	// own only — owner forced to self, tier forced free, public reserved for admins,
-	// clauses sandboxed, and creation capped by the tier quota.
-	// applyStudy validates + persists a study on behalf of u. Non-admin guardrails:
-	// owner forced to self, tier forced free, public reserved for admins, group needs
-	// membership, clauses sandboxed, new studies capped by the tier quota. Shared by
-	// save and import.
-	applyStudy := func(u user.User, st study.Study) error {
-		st.Key = strings.TrimSpace(st.Key)
-		if st.Key == "" {
-			return fmt.Errorf("key required")
-		}
-		existing, exists := studyStore.Get(st.Key)
-		if exists && !u.IsAdmin() && existing.Owner != u.ID {
-			return fmt.Errorf("study %q is not yours", st.Key)
-		}
-		if !u.IsAdmin() {
-			st.Owner = u.ID
-			st.Tier = user.TierFree
-			switch st.Visibility {
-			case study.VisGroup:
-				if !u.InGroup(st.Group) {
-					return fmt.Errorf("not a member of group %q", st.Group)
-				}
-			default: // public/private/unset → non-admins can't publish public; coerce to private
-				st.Visibility = study.VisPrivate
-			}
-			if err := study.ValidateClause(st.Where); err != nil {
-				return fmt.Errorf("WHERE: %w", err)
-			}
-			if err := study.ValidateClause(st.OrderBy); err != nil {
-				return fmt.Errorf("ORDER BY: %w", err)
-			}
-			if !exists {
-				if q := studyQuota(u, cfg); q > 0 {
-					owned := 0
-					for _, s := range studyStore.All() {
-						if s.Owner == u.ID {
-							owned++
-						}
-					}
-					if owned >= q {
-						return fmt.Errorf("study limit reached (%d) on the %s tier — upgrade for more", q, u.Tier)
-					}
-				}
-			}
-		}
-		if strings.TrimSpace(st.Where) != "" { // catch SQL errors before persisting
-			if _, perr := preview(study.Study{Where: st.Where, OrderBy: st.OrderBy, Limit: 1}); perr != nil {
-				return fmt.Errorf("invalid WHERE: %w", perr)
-			}
-		}
-		return studyStore.Upsert(st)
-	}
-
-	mux.HandleFunc("/studies", func(w http.ResponseWriter, r *http.Request) {
-		u, ok := requireUser(w, r)
-		if !ok {
-			return
-		}
-		if r.Method != http.MethodPost {
-			http.Redirect(w, r, "/", http.StatusSeeOther)
-			return
-		}
-		r.ParseForm()
-		back := "/"
-		if u.IsAdmin() {
-			back = "/admin"
-		}
-		key := strings.TrimSpace(r.FormValue("key"))
-		switch r.FormValue("action") {
-		case "save":
-			st := study.Study{
-				Key: key, Title: r.FormValue("title"), Emoji: r.FormValue("emoji"),
-				Owner: r.FormValue("owner"), Visibility: study.Visibility(r.FormValue("visibility")),
-				Group: r.FormValue("group"), Tier: user.Tier(r.FormValue("tier")),
-				Where: r.FormValue("where"), OrderBy: r.FormValue("order_by"), Limit: atoiOr(r.FormValue("limit"), 0),
-			}
-			if err := applyStudy(u, st); err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				fmt.Fprintf(w, "cannot save study: %v", err)
-				return
-			}
-			log.Info("study saved", "key", st.Key, "by", u.ID)
-		case "delete":
-			existing, exists := studyStore.Get(key)
-			if exists && !u.IsAdmin() && existing.Owner != u.ID {
-				w.WriteHeader(http.StatusForbidden)
-				fmt.Fprintln(w, "403 — not your study")
-				return
-			}
-			if err := studyStore.Delete(key); err != nil {
-				log.Warn("study delete failed", "key", key, "error", err)
-			} else {
-				log.Info("study deleted", "key", key, "by", u.ID)
-			}
-		}
-		http.Redirect(w, r, back, http.StatusSeeOther)
-	})
-
-	// Export the acting user's studies (all, for admins) as JSONL — download.
-	mux.HandleFunc("/studies/export", func(w http.ResponseWriter, r *http.Request) {
-		u, ok := requireUser(w, r)
-		if !ok {
-			return
-		}
-		w.Header().Set("Content-Type", "application/x-ndjson")
-		w.Header().Set("Content-Disposition", `attachment; filename="studies.jsonl"`)
-		enc := json.NewEncoder(w)
-		for _, s := range studyStore.All() {
-			if u.IsAdmin() || s.Owner == u.ID {
-				_ = enc.Encode(s)
-			}
-		}
-	})
-
-	// Import studies from pasted JSONL — each applied through the same guardrails.
-	mux.HandleFunc("/studies/import", func(w http.ResponseWriter, r *http.Request) {
-		u, ok := requireUser(w, r)
-		if !ok {
-			return
-		}
-		if r.Method != http.MethodPost {
-			http.Redirect(w, r, "/", http.StatusSeeOther)
-			return
-		}
-		r.ParseForm()
-		studies, err := study.LoadJSONL(strings.NewReader(r.FormValue("jsonl")))
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, "parse error: %v", err)
-			return
-		}
-		imported, failed, firstErr := 0, 0, ""
-		for _, st := range studies {
-			if err := applyStudy(u, st); err != nil {
-				failed++
-				if firstErr == "" {
-					firstErr = err.Error()
-				}
-			} else {
-				imported++
-			}
-		}
-		log.Info("studies imported", "imported", imported, "failed", failed, "by", u.ID)
-		if imported == 0 && failed > 0 {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, "imported 0 of %d — first error: %s", failed, firstErr)
-			return
-		}
-		back := "/"
-		if u.IsAdmin() {
-			back = "/admin"
-		}
-		http.Redirect(w, r, back, http.StatusSeeOther)
-	})
-
-	mux.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
-		page(w, r, true, func(m *dashboard.Model, out io.Writer) error { return m.AdminHTML(out) })
-	})
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
-		page(w, r, false, func(m *dashboard.Model, out io.Writer) error { return m.IndexHTML(out) })
-	})
-
-	// REST API v1 - mount the API handler with full dependencies
-	var apiSigner *authjwt.Signer
-	if cfg.JWTSignSecret != "" {
-		apiSigner = authjwt.NewHMACSigner([]byte(cfg.JWTSignSecret), cfg.JWTIssuer, time.Duration(cfg.JWTSignTTLHours)*time.Hour)
-		log.Info("JWT signing enabled for API login endpoint")
-	}
-	detector := alert.NewDetector(snap)
-	backtestEngine := backtest.NewEngine(snap)
-	apiHandler := api.NewHandlerFull(snap, studyStore, st, users, subStore, detector, backtestEngine, apiSigner, jwtVer, log)
-	mux.Handle("/api/v1/", apiHandler.Router())
-
-	// Bind first, so a port collision fails immediately with a clear error instead of
-	// after a misleading "serving" log.
-	ln, err := net.Listen("tcp", cfg.ServeAddr)
-	if err != nil {
-		log.Error("cannot bind dashboard address (port already in use?)", "addr", cfg.ServeAddr, "error", err)
-		os.Exit(1)
-	}
-	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
-	go func() {
-		<-ctx.Done()
-		shCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		srv.Shutdown(shCtx)
-	}()
-
-	log.Info("dashboard serving", "addr", ln.Addr().String(), "db", cfg.DBPath, "ttl_secs", cfg.ServeTTLSecs)
-	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
-		log.Error("serve failed", "error", err)
-		os.Exit(1)
-	}
-	log.Info("dashboard stopped")
+	srv.Run()
 }

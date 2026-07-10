@@ -26,6 +26,10 @@ func (h *Handler) Router() http.Handler {
 	mux.HandleFunc("PUT /api/v1/studies/{id}", h.UpdateStudy)
 	mux.HandleFunc("DELETE /api/v1/studies/{id}", h.DeleteStudy)
 
+	// Study import/export
+	mux.HandleFunc("POST /api/v1/studies/import", h.ImportStudies)
+	mux.HandleFunc("GET /api/v1/studies/export", h.ExportStudies)
+
 	// Study subscriptions
 	mux.HandleFunc("GET /api/v1/subscriptions", h.Subscriptions)
 	mux.HandleFunc("POST /api/v1/studies/{id}/subscribe", h.Subscribe)

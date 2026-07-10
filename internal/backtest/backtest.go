@@ -81,51 +81,24 @@ func (e *Engine) RunBacktest(s study.Study, startDate, endDate int64, holdDays i
 }
 
 // calculateReturn calculates the return for a symbol over a hold period.
+// Uses parameterized queries via SymbolClose and NearestDate — no string
+// concatenation, no SQL injection.
 func (e *Engine) calculateReturn(symbol string, entryDate int64, holdDays int) (*Result, error) {
-	if err := e.snap.SetActive(entryDate); err != nil {
-		return nil, err
-	}
-	entryMatches, err := e.snap.Run(study.Study{Where: "symbol = '" + symbol + "'"})
-	if err != nil || len(entryMatches) == 0 {
-		return nil, err
-	}
-	entryPx := entryMatches[0].Close
-
-	exitDate := entryDate + int64(holdDays*86400)
-
-	dates, err := e.snap.ListSnapshots()
+	entryPx, err := e.snap.SymbolClose(symbol, entryDate)
 	if err != nil {
 		return nil, err
 	}
 
-	var actualExitDate int64
-	var exitPx float64
-	found := false
-
-	for _, d := range dates {
-		if d >= exitDate {
-			actualExitDate = d
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		if len(dates) > 0 {
-			actualExitDate = dates[len(dates)-1]
-		} else {
-			return nil, err
-		}
-	}
-
-	if err := e.snap.SetActive(actualExitDate); err != nil {
+	exitDate := entryDate + int64(holdDays*86400)
+	actualExitDate, err := e.snap.NearestDate(exitDate)
+	if err != nil {
 		return nil, err
 	}
-	exitMatches, err := e.snap.Run(study.Study{Where: "symbol = '" + symbol + "'"})
-	if err != nil || len(exitMatches) == 0 {
+
+	exitPx, err := e.snap.SymbolClose(symbol, actualExitDate)
+	if err != nil {
 		return nil, err
 	}
-	exitPx = exitMatches[0].Close
 
 	ret := (exitPx - entryPx) / entryPx
 	holdDaysActual := int((actualExitDate - entryDate) / 86400)

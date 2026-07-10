@@ -4,11 +4,12 @@ Guidance for Claude Code (claude.ai/code) working in this repo.
 
 ## Status
 
-**First stab / scaffold.** Buildable skeleton: read-only reader of the cetus
-warehouse (`internal/store`), pure scan logic (`internal/scanner`), env-first
-config, JSON logging, and a `cmd/scanner` entrypoint that emits signals as JSONL.
-The scan rules (volume/price/gap breakouts) are a starting point to iterate on —
-not a finished strategy library.
+**Mature application.** Full-featured market-data scanner with: read-only reader of
+the cetus warehouse (`internal/store`), pure scan logic (`internal/scanner`), 50+
+technical indicators (`internal/indicators`), cross-sectional snapshot with SQL-
+driven studies (`internal/snapshot`), HTTP dashboard with auth and study editor
+(`internal/serve`), historical backfill/backtest (`internal/backtest`), data-quality
+sentinel (`internal/sentinel`), and REST API (`internal/api`).
 
 ## What this is
 
@@ -61,11 +62,37 @@ Non-negotiables from that contract:
 - `internal/scanner` — **pure** `Scan(symbol, bars, cfg) []Signal`. No I/O, no
   state — the seam for a future strategy/back-test engine. Thresholds are
   data-driven (config), never hardcoded.
-- `internal/config` — env-first configuration (`SCANNER_*`).
+- `internal/indicators` — 50+ pure technical indicator functions (SMA, EMA, RSI,
+  MACD, Bollinger Bands, ATR, etc.) with strict no-lookahead.
+- `internal/screen` — builds `SnapshotRow` from bars, preset studies, market breadth.
+- `internal/scan` — concurrent whole-universe snapshot with worker pool and
+  `BarLoader` interface for testability.
+- `internal/snapshot` — scanner's own SQLite store: materializes cross-sectional
+  snapshot, runs SQL-WHERE studies, provides indexed lookups (`SymbolClose`,
+  `NearestDate`) for backtest performance.
+- `internal/study` — studies as data: SQL-WHERE clauses in JSONL, owner + tier +
+  visibility, file-backed store with CRUD.
+- `internal/user` — user entity with tiers (free/pro), roles (user/admin),
+  PBKDF2 password hashing, file-backed store.
+- `internal/serve` — HTTP server: dashboard, session auth, study editor with
+  live preview, admin console, REST API mounting. Extracted from `cmd/scanner`
+  for maintainability.
+- `internal/api` — REST API handlers: health, features catalog, studies CRUD,
+  subscriptions, alerts, backtest, universe/symbols, auth.
+- `internal/authjwt` — stdlib JWT verifier (HS/RS, alg-confusion-safe) for
+  proxy auth mode.
+- `internal/digest` — digest assembly + html/text/json renderers.
+- `internal/dashboard` — admin ops-console HTML renderer.
+- `internal/backtest` — historical backtesting engine with parameterized queries
+  (SQLite-first, indexed lookups).
+- `internal/sentinel` — data-quality Tier-0 flags (deterministic; AI tiers extend it).
+- `internal/predicate` — structured study compiler: IDs → SQL, injection-proof.
+- `internal/features` — feature catalog with metadata for 50+ indicators.
+- `internal/config` — env-first configuration (`SCANNER_*`), exe-relative DB path resolution.
 - `internal/telemetry` — structured JSON logger to **stderr** (so stdout carries
   the signal stream cleanly).
-- `cmd/scanner` — load config → open DB read-only → for each symbol load the
-  window, `Scan`, emit signals as JSONL to stdout.
+- `cmd/scanner` — load config → dispatch subcommands (scan, digest, serve,
+  anomalies, studies, users, backfill).
 
 ## Ethos (inherited from `../../ETHOS.md`)
 

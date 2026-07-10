@@ -130,7 +130,14 @@ func ValidateClause(clause string) error {
 		return fmt.Errorf("';' is not allowed")
 	}
 	lower := strings.ToLower(clause)
-	for _, bad := range []string{"--", "/*", "*/", "attach", "pragma", "load_extension", "union", "select"} {
+	for _, bad := range []string{
+		"--", "/*", "*/",
+		"attach", "detach", "pragma", "load_extension",
+		"union", "select",
+		"insert", "delete", "update", "replace",
+		"create", "drop", "alter",
+		"exec", "trigger", "savepoint",
+	} {
 		if strings.Contains(lower, bad) {
 			return fmt.Errorf("%q is not allowed here", bad)
 		}

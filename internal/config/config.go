@@ -5,6 +5,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 )
 
@@ -99,12 +100,29 @@ type Config struct {
 	BackfillDays int
 }
 
-// defaultCetusDB is the fallback warehouse path: the shared CENTRAL store at
-// DATA/CETUS (../../../DATA/CETUS/cetus.db from the scanner dir), which the pipeline's
-// create-cetus.sh --wipe publishes to. This is the canonical, latest warehouse — NOT
-// the pipeline repo's local dev copy. Prefer setting CETUS_DB (absolute) for robustness
-// against the run directory.
-const defaultCetusDB = "../../../DATA/CETUS/cetus.db"
+// defaultCetusDB is the fallback warehouse path, relative to the executable.
+// From bin/scanner: ../../CETUS/cetus.db reaches chartgeometry.com/DATA/CETUS/cetus.db.
+// Prefer setting CETUS_DB (absolute) for robustness.
+const defaultCetusDB = "../../CETUS/cetus.db"
+
+// defaultScannerDB is the fallback path for the scanner's own database,
+// relative to the executable. From bin/scanner: ../../SCANNER/scanner.db.
+// Prefer setting SCANNER_STORE_DB (absolute) for robustness.
+const defaultScannerDB = "../../SCANNER/scanner.db"
+
+// resolveRelative resolves a path relative to the executable's directory.
+// If the path is already absolute, empty, or ":memory:", it's returned unchanged.
+// If the executable can't be determined, the path is returned as-is (CWD-relative).
+func resolveRelative(path string) string {
+	if path == "" || path == ":memory:" || filepath.IsAbs(path) {
+		return path
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(filepath.Dir(exe), path)
+}
 
 // resolveDBPath honors the shared warehouse convention:
 //
@@ -119,7 +137,17 @@ func resolveDBPath() string {
 	if v := os.Getenv("CETUS_DB"); v != "" {
 		return v
 	}
-	return defaultCetusDB
+	return resolveRelative(defaultCetusDB)
+}
+
+// resolveStoreDB returns the scanner's own store path. Env var values are used
+// verbatim (user controls absolute vs CWD-relative); only the built-in default
+// is resolved relative to the executable.
+func resolveStoreDB() string {
+	if v := os.Getenv("SCANNER_STORE_DB"); v != "" {
+		return v
+	}
+	return resolveRelative(defaultScannerDB)
 }
 
 // Load reads configuration from the environment, applying lean defaults. The
@@ -161,10 +189,10 @@ func Load() Config {
 
 		AnomalyFormat: envOr("SCANNER_ANOMALY_FORMAT", "text"),
 
-		// Own store defaults to in-memory (rebuilt each run) — on a 32 GB box the
-		// whole snapshot lives in RAM. Set a path (e.g. scanner.db) to persist it
-		// for ad-hoc sqlite3 inspection.
-		StoreDB:       envOr("SCANNER_STORE_DB", ":memory:"),
+		// Own store defaults to persistent path at DATA/SCANNER/scanner.db,
+		// resolved relative to the executable. Set SCANNER_STORE_DB to override,
+		// or use ":memory:" for ephemeral snapshots.
+		StoreDB:       resolveStoreDB(),
 		StudiesPath:   envOr("SCANNER_STUDIES_PATH", "studies.jsonl"),
 		StudiesFormat: envOr("SCANNER_STUDIES_FORMAT", "text"),
 		FreeStudyQuota: envInt("SCANNER_FREE_STUDY_QUOTA", 3),

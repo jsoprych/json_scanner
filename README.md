@@ -181,7 +181,7 @@ the read-only cetus warehouse**:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `SCANNER_STORE_DB` | `:memory:` | The scanner's own SQLite store (snapshot materialization). Memory-first; a path (e.g. `scanner.db`) persists it for `sqlite3` inspection |
+| `SCANNER_STORE_DB` | `../../SCANNER/scanner.db` (exe-relative) | The scanner's own SQLite store (snapshot materialization). Resolved relative to the executable; set to `:memory:` for ephemeral snapshots |
 | `SCANNER_STUDIES_PATH` | `studies.jsonl` | JSONL of SQL-`WHERE` studies (owner + tier per line) |
 | `SCANNER_STUDIES_FORMAT` | `text` | `text` \| `jsonl` |
 | `SCANNER_USERS_PATH` | `users.jsonl` | User registry (id · tier · role) |
@@ -200,7 +200,7 @@ internal/indicators/  pure indicator funcs (modular: trend.go, momentum.go, pric
 internal/screen/      SnapshotRow build, preset studies, market breadth (pure)
 internal/scan/        concurrent whole-universe snapshot (worker pool, BarLoader iface)
 internal/sentinel/    data-quality Tier-0 flags (deterministic; AI tiers extend it)
-internal/snapshot/    scanner's OWN SQLite store; materialize snapshot + run SQL studies
+internal/snapshot/    scanner's OWN SQLite store; materialize snapshot + run SQL studies + indexed lookups (SymbolClose, NearestDate)
 internal/study/       studies as data (SQL-WHERE, JSONL, owner + tier)
 internal/user/        User entity + file-backed Store: tiers, roles, sha256 login, CRUD
 internal/authjwt/     stdlib JWT verifier (HS/RS, alg-confusion-safe) for proxy auth
@@ -208,6 +208,7 @@ internal/api/         REST API handlers (health, features)
 internal/features/    feature catalog with metadata (50+ indicators)
 internal/digest/      Digest assembly + html/text/json renderers
 internal/dashboard/   admin ops-console renderer (serve)
+internal/serve/       HTTP server: dashboard, auth, study editor, REST API (extracted from cmd/scanner)
 internal/config/      env-first configuration (SCANNER_*, CETUS_DB)
 internal/telemetry/   slog JSON logger (stderr)
 docs/                 DESIGN.md (master) · SCHEMA.md · INDICATORS.md · API.md · DEPLOY-cloudflare.md · AGENTS.md

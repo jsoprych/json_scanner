@@ -26,6 +26,13 @@ type DB struct {
 	activeDate   int64 // the snapshot_date used for Run queries
 }
 
+// SnapshotBatch represents a single snapshot to be batched.
+type SnapshotBatch struct {
+	Rows         []screen.SnapshotRow
+	BarTs        int64
+	SnapshotDate int64
+}
+
 // Open opens a snapshot DB; path "" (or ":memory:") uses an in-memory DB. A single
 // connection is pinned so an in-memory table survives for the DB's lifetime.
 func Open(path string) (*DB, error) {
@@ -43,6 +50,36 @@ func Open(path string) (*DB, error) {
 
 // Close releases the DB.
 func (d *DB) Close() error { return d.db.Close() }
+
+// createTableSQL is the single source of truth for the snapshot table schema.
+// All Load/LoadHistory methods use this constant via ensureTable().
+const createTableSQL = `CREATE TABLE IF NOT EXISTS snapshot(
+	snapshot_date INTEGER, symbol TEXT, timestamp INTEGER,
+	close REAL, high REAL, low REAL, open REAL,
+	sma5 REAL, sma10 REAL, sma20 REAL, sma30 REAL, sma50 REAL, sma100 REAL, sma200 REAL,
+	ema10 REAL, ema21 REAL, ema50 REAL, ema100 REAL, ema200 REAL,
+	pct_from_sma50 REAL, pct_from_sma200 REAL, ma_stack INTEGER,
+	rsi14 REAL, macd REAL, macd_signal REAL, macd_hist REAL,
+	stoch_k REAL, stoch_d REAL, willr14 REAL, cci20 REAL,
+	roc10 REAL, roc20 REAL, adx14 REAL, di_plus REAL, di_minus REAL,
+	atr14 REAL, atr_pct REAL,
+	bb_upper REAL, bb_mid REAL, bb_lower REAL, bb_bandwidth REAL, bb_pct_b REAL,
+	hist_vol20 REAL,
+	high_52w REAL, low_52w REAL, is_52w_high INTEGER, is_52w_low INTEGER,
+	gap_pct REAL, true_range REAL, pct_off_52w_high REAL, pct_above_52w_low REAL,
+	ret_1d REAL, ret_5d REAL, ret_1m REAL, ret_3m REAL, ret_6m REAL, ret_1y REAL,
+	dollar_vol REAL, avg_dollar_vol20 REAL, rel_volume REAL, obv REAL, vwap_dist REAL, mfi14 REAL,
+	golden_cross INTEGER, oversold_bounce INTEGER,
+	PRIMARY KEY (snapshot_date, symbol))`
+
+// ensureTable creates the snapshot table if it doesn't exist.
+func (d *DB) ensureTable() error {
+	_, err := d.db.Exec(createTableSQL)
+	if err != nil {
+		return fmt.Errorf("create snapshot table: %w", err)
+	}
+	return nil
+}
 
 // columns of the snapshot table, in insert order.
 var columns = []string{
@@ -77,25 +114,8 @@ func (d *DB) Load(rows []screen.SnapshotRow, ts int64) error {
 	if _, err := d.db.Exec(`DROP TABLE IF EXISTS snapshot`); err != nil {
 		return fmt.Errorf("drop snapshot: %w", err)
 	}
-	if _, err := d.db.Exec(`CREATE TABLE snapshot(
-		snapshot_date INTEGER, symbol TEXT, timestamp INTEGER,
-		close REAL, high REAL, low REAL, open REAL,
-		sma5 REAL, sma10 REAL, sma20 REAL, sma30 REAL, sma50 REAL, sma100 REAL, sma200 REAL,
-		ema10 REAL, ema21 REAL, ema50 REAL, ema100 REAL, ema200 REAL,
-		pct_from_sma50 REAL, pct_from_sma200 REAL, ma_stack INTEGER,
-		rsi14 REAL, macd REAL, macd_signal REAL, macd_hist REAL,
-		stoch_k REAL, stoch_d REAL, willr14 REAL, cci20 REAL,
-		roc10 REAL, roc20 REAL, adx14 REAL, di_plus REAL, di_minus REAL,
-		atr14 REAL, atr_pct REAL,
-		bb_upper REAL, bb_mid REAL, bb_lower REAL, bb_bandwidth REAL, bb_pct_b REAL,
-		hist_vol20 REAL,
-		high_52w REAL, low_52w REAL, is_52w_high INTEGER, is_52w_low INTEGER,
-		gap_pct REAL, true_range REAL, pct_off_52w_high REAL, pct_above_52w_low REAL,
-		ret_1d REAL, ret_5d REAL, ret_1m REAL, ret_3m REAL, ret_6m REAL, ret_1y REAL,
-		dollar_vol REAL, avg_dollar_vol20 REAL, rel_volume REAL, obv REAL, vwap_dist REAL, mfi14 REAL,
-		golden_cross INTEGER, oversold_bounce INTEGER,
-		PRIMARY KEY (snapshot_date, symbol))`); err != nil {
-		return fmt.Errorf("create snapshot: %w", err)
+	if err := d.ensureTable(); err != nil {
+		return err
 	}
 
 	tx, err := d.db.Begin()
@@ -152,30 +172,135 @@ func (d *DB) Load(rows []screen.SnapshotRow, ts int64) error {
 	return nil
 }
 
+// LoadHistoryBatch inserts multiple snapshots in a single transaction.
+// This is much more efficient than calling LoadHistoryInsert() for each date.
+func (d *DB) LoadHistoryBatch(snapshots []SnapshotBatch) error {
+	if len(snapshots) == 0 {
+		return nil
+	}
+
+	if err := d.ensureTable(); err != nil {
+		return err
+	}
+
+	// Single transaction for all snapshots
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	ph := strings.TrimSuffix(strings.Repeat("?,", len(columns)), ",")
+	stmt, err := tx.Prepare("INSERT OR IGNORE INTO snapshot(" + strings.Join(columns, ",") + ") VALUES(" + ph + ")")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	totalRows := 0
+	for _, snap := range snapshots {
+		for _, r := range snap.Rows {
+			if _, err := stmt.Exec(
+				snap.SnapshotDate, r.Symbol, snap.BarTs,
+				nz(r.Close), nz(r.High), nz(r.Low), nz(r.Open),
+				nz(r.SMA5), nz(r.SMA10), nz(r.SMA20), nz(r.SMA30), nz(r.SMA50), nz(r.SMA100), nz(r.SMA200),
+				nz(r.EMA10), nz(r.EMA21), nz(r.EMA50), nz(r.EMA100), nz(r.EMA200),
+				nz(r.PctFromSMA50), nz(r.PctFromSMA200), boolToInt(r.MAStack),
+				nz(r.RSI14), nz(r.MACD), nz(r.MACDSignal), nz(r.MACDHist),
+				nz(r.StochK), nz(r.StochD), nz(r.WilliamsR), nz(r.CCI20),
+				nz(r.ROC10), nz(r.ROC20), nz(r.ADX14), nz(r.DIPlus), nz(r.DIMinus),
+				nz(r.ATR14), nz(r.ATRPct),
+				nz(r.BBUpper), nz(r.BBMiddle), nz(r.BBLower), nz(r.BBWidth), nz(r.BBPctB),
+				nz(r.HistVol20),
+				nz(r.High52w), nz(r.Low52w), boolToInt(r.Is52wHigh), boolToInt(r.Is52wLow),
+				nz(r.GapPct), nz(r.TrueRange), nz(r.PctOff52wHigh), nz(r.PctAbove52wLow),
+				nz(r.Ret1d), nz(r.Ret5d), nz(r.Ret1m), nz(r.Ret3m), nz(r.Ret6m), nz(r.Ret1y),
+				nz(r.DollarVol), nz(r.AvgDollarVol20), nz(r.RelVolume), nz(r.OBV), nz(r.VWAPDist), nz(r.MFI14),
+				boolToInt(r.IsGoldenCross), boolToInt(r.IsOversoldBounce),
+			); err != nil {
+				return err
+			}
+			totalRows++
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	// Update metadata to reflect the latest snapshot
+	if len(snapshots) > 0 {
+		last := snapshots[len(snapshots)-1]
+		d.snapshotDate = last.SnapshotDate
+		d.activeDate = last.SnapshotDate
+		d.symbolCount = len(last.Rows)
+		d.snapshotID = fmt.Sprintf("%d", last.SnapshotDate)
+	}
+
+	return nil
+}
+
+// LoadHistoryInsert inserts a snapshot for a specific date without deleting existing data.
+// Uses INSERT OR IGNORE to skip symbols that already exist for this date.
+// This is non-destructive and safe for incremental backfills.
+func (d *DB) LoadHistoryInsert(rows []screen.SnapshotRow, barTs, snapshotDate int64) error {
+	if err := d.ensureTable(); err != nil {
+		return err
+	}
+
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	ph := strings.TrimSuffix(strings.Repeat("?,", len(columns)), ",")
+	stmt, err := tx.Prepare("INSERT OR IGNORE INTO snapshot(" + strings.Join(columns, ",") + ") VALUES(" + ph + ")")
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	defer stmt.Close()
+	for _, r := range rows {
+		if _, err := stmt.Exec(
+			snapshotDate, r.Symbol, barTs,
+			nz(r.Close), nz(r.High), nz(r.Low), nz(r.Open),
+			nz(r.SMA5), nz(r.SMA10), nz(r.SMA20), nz(r.SMA30), nz(r.SMA50), nz(r.SMA100), nz(r.SMA200),
+			nz(r.EMA10), nz(r.EMA21), nz(r.EMA50), nz(r.EMA100), nz(r.EMA200),
+			nz(r.PctFromSMA50), nz(r.PctFromSMA200), boolToInt(r.MAStack),
+			nz(r.RSI14), nz(r.MACD), nz(r.MACDSignal), nz(r.MACDHist),
+			nz(r.StochK), nz(r.StochD), nz(r.WilliamsR), nz(r.CCI20),
+			nz(r.ROC10), nz(r.ROC20), nz(r.ADX14), nz(r.DIPlus), nz(r.DIMinus),
+			nz(r.ATR14), nz(r.ATRPct),
+			nz(r.BBUpper), nz(r.BBMiddle), nz(r.BBLower), nz(r.BBWidth), nz(r.BBPctB),
+			nz(r.HistVol20),
+			nz(r.High52w), nz(r.Low52w), boolToInt(r.Is52wHigh), boolToInt(r.Is52wLow),
+			nz(r.GapPct), nz(r.TrueRange), nz(r.PctOff52wHigh), nz(r.PctAbove52wLow),
+			nz(r.Ret1d), nz(r.Ret5d), nz(r.Ret1m), nz(r.Ret3m), nz(r.Ret6m), nz(r.Ret1y),
+			nz(r.DollarVol), nz(r.AvgDollarVol20), nz(r.RelVolume), nz(r.OBV), nz(r.VWAPDist), nz(r.MFI14),
+			boolToInt(r.IsGoldenCross), boolToInt(r.IsOversoldBounce),
+		); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	// Update metadata to reflect the latest snapshot
+	d.snapshotDate = snapshotDate
+	d.activeDate = snapshotDate
+	d.symbolCount = len(rows)
+	d.snapshotID = fmt.Sprintf("%d", snapshotDate)
+
+	return nil
+}
+
 // LoadHistory inserts a snapshot for a specific date without dropping existing data.
 // The snapshot_date is the date the snapshot was computed for (typically the latest bar date).
 // Multiple snapshots can coexist, keyed by (snapshot_date, symbol).
 func (d *DB) LoadHistory(rows []screen.SnapshotRow, barTs, snapshotDate int64) error {
-	// Ensure the table exists (idempotent)
-	if _, err := d.db.Exec(`CREATE TABLE IF NOT EXISTS snapshot(
-		snapshot_date INTEGER, symbol TEXT, timestamp INTEGER,
-		close REAL, high REAL, low REAL, open REAL,
-		sma5 REAL, sma10 REAL, sma20 REAL, sma30 REAL, sma50 REAL, sma100 REAL, sma200 REAL,
-		ema10 REAL, ema21 REAL, ema50 REAL, ema100 REAL, ema200 REAL,
-		pct_from_sma50 REAL, pct_from_sma200 REAL, ma_stack INTEGER,
-		rsi14 REAL, macd REAL, macd_signal REAL, macd_hist REAL,
-		stoch_k REAL, stoch_d REAL, willr14 REAL, cci20 REAL,
-		roc10 REAL, roc20 REAL, adx14 REAL, di_plus REAL, di_minus REAL,
-		atr14 REAL, atr_pct REAL,
-		bb_upper REAL, bb_mid REAL, bb_lower REAL, bb_bandwidth REAL, bb_pct_b REAL,
-		hist_vol20 REAL,
-		high_52w REAL, low_52w REAL, is_52w_high INTEGER, is_52w_low INTEGER,
-		gap_pct REAL, true_range REAL, pct_off_52w_high REAL, pct_above_52w_low REAL,
-		ret_1d REAL, ret_5d REAL, ret_1m REAL, ret_3m REAL, ret_6m REAL, ret_1y REAL,
-		dollar_vol REAL, avg_dollar_vol20 REAL, rel_volume REAL, obv REAL, vwap_dist REAL, mfi14 REAL,
-		golden_cross INTEGER, oversold_bounce INTEGER,
-		PRIMARY KEY (snapshot_date, symbol))`); err != nil {
-		return fmt.Errorf("create snapshot: %w", err)
+	if err := d.ensureTable(); err != nil {
+		return err
 	}
 
 	// Delete existing snapshot for this date (replace, not append)
@@ -228,6 +353,15 @@ func (d *DB) LoadHistory(rows []screen.SnapshotRow, barTs, snapshotDate int64) e
 	d.snapshotID = fmt.Sprintf("%d", snapshotDate)
 
 	return nil
+}
+
+// HasSnapshot checks if a snapshot exists for the given date.
+func (d *DB) HasSnapshot(snapshotDate int64) (bool, error) {
+	var n int
+	if err := d.db.QueryRow("SELECT COUNT(*) FROM snapshot WHERE snapshot_date = ?", snapshotDate).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // ListSnapshots returns the available snapshot dates (Unix seconds), newest first.
@@ -322,6 +456,36 @@ type Match struct {
 	RSI14     float64 `json:"rsi14"`
 	Ret3m     float64 `json:"ret_3m"`
 	DollarVol float64 `json:"dollar_vol"`
+}
+
+// SymbolClose returns the close price for one symbol on one snapshot date.
+// Uses the PK index (snapshot_date, symbol) — O(log N), not a full scan.
+func (d *DB) SymbolClose(symbol string, date int64) (float64, error) {
+	var close sql.NullFloat64
+	err := d.db.QueryRow(
+		"SELECT close FROM snapshot WHERE snapshot_date = ? AND symbol = ?",
+		date, symbol,
+	).Scan(&close)
+	if err != nil {
+		return 0, err
+	}
+	if !close.Valid {
+		return 0, sql.ErrNoRows
+	}
+	return close.Float64, nil
+}
+
+// NearestDate returns the earliest snapshot_date >= from.
+// Returns sql.ErrNoRows if no snapshot exists at or after from.
+func (d *DB) NearestDate(from int64) (int64, error) {
+	var date int64
+	err := d.db.QueryRow(
+		"SELECT MIN(snapshot_date) FROM snapshot WHERE snapshot_date >= ?", from,
+	).Scan(&date)
+	if err != nil {
+		return 0, err
+	}
+	return date, nil
 }
 
 // Run executes a study's WHERE / ORDER BY / LIMIT and returns matches.

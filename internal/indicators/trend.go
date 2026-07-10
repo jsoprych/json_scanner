@@ -34,7 +34,7 @@ func SMA(vals []float64, period int) []float64 {
 // out[i] excludes bar i (no lookahead).
 func EMA(vals []float64, period int) []float64 {
 	out := make([]float64, len(vals))
-	if period < 1 || len(vals) < period {
+	if period < 1 || len(vals) <= period {
 		for i := range out {
 			out[i] = math.NaN()
 		}
