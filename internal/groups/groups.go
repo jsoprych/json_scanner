@@ -3,6 +3,9 @@ package groups
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"io"
+	"cetus-marketdata-scanner/internal/iohelp"
 	"fmt"
 	"time"
 )
@@ -255,4 +258,34 @@ func (s *Store) UpdateMemberRole(ctx context.Context, groupID, userID, role stri
 		return fmt.Errorf("member not found")
 	}
 	return nil
+}
+
+// ExportJSON writes all groups as a wrapped JSON object.
+func (s *Store) ExportJSON(ctx context.Context, w io.Writer) error {
+	groups, err := s.List(ctx)
+	if err != nil {
+		return err
+	}
+	return iohelp.ExportJSON(w, "groups", groups, len(groups))
+}
+
+// ImportJSON imports groups from a wrapped JSON object.
+func (s *Store) ImportJSON(ctx context.Context, r io.Reader) (int, error) {
+	exp, err := iohelp.ImportJSON(r)
+	if err != nil {
+		return 0, err
+	}
+	data, _ := json.Marshal(exp.Items)
+	var groups []Group
+	if err := json.Unmarshal(data, &groups); err != nil {
+		return 0, fmt.Errorf("parse groups: %w", err)
+	}
+	imported := 0
+	for _, g := range groups {
+		if err := s.Create(ctx, g); err != nil {
+			continue
+		}
+		imported++
+	}
+	return imported, nil
 }

@@ -203,3 +203,26 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// ExportUsers exports all users as wrapped JSON (admin only).
+func (h *Handler) ExportUsers(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.requireAuth(w, r); !ok {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", `attachment; filename="users-export.json"`)
+	h.users.ExportJSON(w)
+}
+
+// ImportUsers imports users from wrapped JSON (admin only).
+func (h *Handler) ImportUsers(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.requireAuth(w, r); !ok {
+		return
+	}
+	imported, err := h.users.ImportJSON(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "IMPORT_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"imported": imported})
+}

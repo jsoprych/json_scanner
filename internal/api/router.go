@@ -101,5 +101,17 @@ func (h *Handler) Router() http.Handler {
 	mux.HandleFunc("PUT /api/v1/users/{user_id}/limits", h.SetUserLimits)
 	mux.HandleFunc("GET /api/v1/users/{user_id}/usage", h.GetUserUsage)
 
+	// Users — import/export
+	mux.HandleFunc("GET /api/v1/users/export", h.ExportUsers)
+	mux.HandleFunc("POST /api/v1/users/import", h.ImportUsers)
+
+	// Groups — import/export
+	mux.HandleFunc("GET /api/v1/groups/export", h.ExportGroups)
+	mux.HandleFunc("POST /api/v1/groups/import", h.ImportGroups)
+
+	// Roles — import/export
+	mux.HandleFunc("GET /api/v1/roles/export", h.ExportRoles)
+	mux.HandleFunc("POST /api/v1/roles/import", h.ImportRoles)
+
 	return mux
 }

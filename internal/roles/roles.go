@@ -4,8 +4,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"time"
+
+	"cetus-marketdata-scanner/internal/iohelp"
 
 	_ "modernc.org/sqlite"
 )
@@ -255,4 +258,34 @@ func (s *Store) HasCapability(roleID, capability string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// ExportJSON writes all roles as a wrapped JSON object.
+func (s *Store) ExportJSON(w io.Writer) error {
+	roles, err := s.List()
+	if err != nil {
+		return err
+	}
+	return iohelp.ExportJSON(w, "roles", roles, len(roles))
+}
+
+// ImportJSON imports roles from a wrapped JSON object.
+func (s *Store) ImportJSON(r io.Reader) (int, error) {
+	exp, err := iohelp.ImportJSON(r)
+	if err != nil {
+		return 0, err
+	}
+	data, _ := json.Marshal(exp.Items)
+	var roles []Role
+	if err := json.Unmarshal(data, &roles); err != nil {
+		return 0, fmt.Errorf("parse roles: %w", err)
+	}
+	imported := 0
+	for _, role := range roles {
+		if err := s.Create(role); err != nil {
+			continue
+		}
+		imported++
+	}
+	return imported, nil
 }

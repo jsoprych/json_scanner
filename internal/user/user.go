@@ -21,6 +21,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"cetus-marketdata-scanner/internal/iohelp"
 )
 
 // pwEnc encodes salt/derived-key in password hashes (compact, unpadded).
@@ -414,4 +416,34 @@ func (s *Store) ExportJSONL(w io.Writer) error {
 // ImportJSONL imports users from a JSONL file. Existing users are skipped.
 func (s *Store) ImportJSONL(path string) error {
 	return s.importJSONLFile(path)
+}
+
+// ExportJSON writes all users as a wrapped JSON object with metadata.
+func (s *Store) ExportJSON(w io.Writer) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return iohelp.ExportJSON(w, "users", s.all, len(s.all))
+}
+
+// ImportJSON imports users from a wrapped JSON object.
+// Returns the count of newly imported users.
+func (s *Store) ImportJSON(r io.Reader) (int, error) {
+	exp, err := iohelp.ImportJSON(r)
+	if err != nil {
+		return 0, err
+	}
+	// Decode items as []User
+	data, _ := json.Marshal(exp.Items)
+	var users []User
+	if err := json.Unmarshal(data, &users); err != nil {
+		return 0, fmt.Errorf("parse users: %w", err)
+	}
+	imported := 0
+	for _, u := range users {
+		if err := s.Create(u); err != nil {
+			continue // skip duplicates
+		}
+		imported++
+	}
+	return imported, nil
 }

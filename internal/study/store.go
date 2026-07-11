@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"cetus-marketdata-scanner/internal/iohelp"
 	"cetus-marketdata-scanner/internal/user"
 )
 
@@ -196,4 +197,32 @@ func (s *Store) ExportJSONL(w io.Writer) error {
 // ImportJSONL imports studies from a JSONL file. Existing studies are updated.
 func (s *Store) ImportJSONL(path string) error {
 	return s.importJSONLFile(path)
+}
+
+// ExportJSON writes all studies as a wrapped JSON object with metadata.
+func (s *Store) ExportJSON(w io.Writer) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return iohelp.ExportJSON(w, "studies", s.all, len(s.all))
+}
+
+// ImportJSON imports studies from a wrapped JSON object.
+func (s *Store) ImportJSON(r io.Reader) (int, error) {
+	exp, err := iohelp.ImportJSON(r)
+	if err != nil {
+		return 0, err
+	}
+	data, _ := json.Marshal(exp.Items)
+	var studies []Study
+	if err := json.Unmarshal(data, &studies); err != nil {
+		return 0, fmt.Errorf("parse studies: %w", err)
+	}
+	imported := 0
+	for _, st := range studies {
+		if err := s.Upsert(st); err != nil {
+			continue
+		}
+		imported++
+	}
+	return imported, nil
 }

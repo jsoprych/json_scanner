@@ -266,3 +266,26 @@ func (h *Handler) ListGroupMembers(w http.ResponseWriter, r *http.Request) {
 		"count":   len(members),
 	})
 }
+
+// ExportGroups exports all groups as wrapped JSON.
+func (h *Handler) ExportGroups(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.requireAuth(w, r); !ok {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", `attachment; filename="groups-export.json"`)
+	h.groups.ExportJSON(r.Context(), w)
+}
+
+// ImportGroups imports groups from wrapped JSON.
+func (h *Handler) ImportGroups(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.requireAuth(w, r); !ok {
+		return
+	}
+	imported, err := h.groups.ImportJSON(r.Context(), r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "IMPORT_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"imported": imported})
+}

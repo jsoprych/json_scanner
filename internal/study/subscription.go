@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"sync"
+
+	"cetus-marketdata-scanner/internal/iohelp"
 )
 
 // Subscription represents a user's subscription to a study.
@@ -280,4 +282,39 @@ func (s *SubscriptionStore) String() string {
 	defer s.mu.RUnlock()
 
 	return fmt.Sprintf("SubscriptionStore{users: %d, subscriptions: %d}", len(s.subs), s.Count())
+}
+
+// ExportJSON writes all subscriptions as a wrapped JSON object.
+func (s *SubscriptionStore) ExportJSON(w io.Writer) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	// Build flat list of subs
+	subs := make([]Subscription, 0)
+	for userID, studies := range s.subs {
+		for studyKey := range studies {
+			subs = append(subs, Subscription{UserID: userID, StudyKey: studyKey})
+		}
+	}
+	return iohelp.ExportJSON(w, "subscriptions", subs, len(subs))
+}
+
+// ImportJSON imports subscriptions from a wrapped JSON object.
+func (s *SubscriptionStore) ImportJSON(r io.Reader) (int, error) {
+	exp, err := iohelp.ImportJSON(r)
+	if err != nil {
+		return 0, err
+	}
+	data, _ := json.Marshal(exp.Items)
+	var subs []Subscription
+	if err := json.Unmarshal(data, &subs); err != nil {
+		return 0, fmt.Errorf("parse subscriptions: %w", err)
+	}
+	imported := 0
+	for _, sub := range subs {
+		if err := s.Subscribe(sub.UserID, sub.StudyKey); err != nil {
+			continue
+		}
+		imported++
+	}
+	return imported, nil
 }

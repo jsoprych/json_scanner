@@ -150,3 +150,26 @@ func (h *Handler) DeleteRole(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// ExportRoles exports all roles as wrapped JSON.
+func (h *Handler) ExportRoles(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.requireAuth(w, r); !ok {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", `attachment; filename="roles-export.json"`)
+	h.roles.ExportJSON(w)
+}
+
+// ImportRoles imports roles from wrapped JSON (admin only).
+func (h *Handler) ImportRoles(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.requireAuth(w, r); !ok {
+		return
+	}
+	imported, err := h.roles.ImportJSON(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "IMPORT_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"imported": imported})
+}
