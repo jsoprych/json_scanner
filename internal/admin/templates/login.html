@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login - Cetus Scanner Admin</title>
+  <link rel="stylesheet" href="/admin/static/styles.css">
+  <style>
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background: var(--bg-secondary);
+    }
+    .login-container {
+      width: 100%;
+      max-width: 400px;
+      padding: var(--spacing-lg);
+    }
+    .login-card {
+      background: var(--bg-primary);
+      border-radius: var(--border-radius-lg);
+      box-shadow: var(--shadow-lg);
+      padding: var(--spacing-xl);
+    }
+    .login-header {
+      text-align: center;
+      margin-bottom: var(--spacing-xl);
+    }
+    .login-logo {
+      font-size: var(--font-size-2xl);
+      font-weight: 700;
+      color: var(--color-primary);
+      margin-bottom: var(--spacing-sm);
+    }
+    .login-subtitle {
+      color: var(--text-secondary);
+      font-size: var(--font-size-sm);
+    }
+    .login-error {
+      background: var(--color-danger);
+      color: var(--text-inverse);
+      padding: var(--spacing-sm) var(--spacing-md);
+      border-radius: var(--border-radius);
+      margin-bottom: var(--spacing-md);
+      font-size: var(--font-size-sm);
+    }
+    .login-footer {
+      text-align: center;
+      margin-top: var(--spacing-lg);
+      font-size: var(--font-size-sm);
+      color: var(--text-tertiary);
+    }
+  </style>
+</head>
+<body>
+  <div class="login-container" x-data="loginForm()">
+    <div class="login-card">
+      <div class="login-header">
+        <div class="login-logo">Cetus Admin</div>
+        <div class="login-subtitle">Sign in to your account</div>
+      </div>
+
+      <div x-show="error" class="login-error" x-text="error"></div>
+
+      <form @submit.prevent="handleLogin()">
+        <div class="form-group">
+          <label class="form-label">Username</label>
+          <input 
+            type="text" 
+            class="form-input" 
+            x-model="username"
+            required
+            autofocus
+            autocomplete="username"
+          >
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <input 
+            type="password" 
+            class="form-input" 
+            x-model="password"
+            required
+            autocomplete="current-password"
+          >
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="width: 100%;" :disabled="loading">
+          <span x-show="!loading">Sign In</span>
+          <span x-show="loading">Signing in...</span>
+        </button>
+      </form>
+
+      <div class="login-footer">
+        Default credentials: admin / admin
+      </div>
+    </div>
+  </div>
+
+  <script src="/admin/static/js/api.js"></script>
+  <script>
+    function loginForm() {
+      return {
+        username: '',
+        password: '',
+        error: '',
+        loading: false,
+
+        async handleLogin() {
+          this.error = '';
+          this.loading = true;
+
+          try {
+            const response = await fetch('/api/v1/auth/login', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                username: this.username,
+                password: this.password
+              })
+            });
+
+            if (!response.ok) {
+              const data = await response.json();
+              throw new Error(data.error || 'Login failed');
+            }
+
+            const data = await response.json();
+            
+            // Store token
+            localStorage.setItem('auth_token', data.token);
+            localStorage.setItem('user', JSON.stringify(data.user));
+
+            // Redirect to admin panel
+            window.location.href = '/admin/dashboard';
+          } catch (error) {
+            this.error = error.message;
+          } finally {
+            this.loading = false;
+          }
+        }
+      };
+    }
+  </script>
+</body>
+</html>

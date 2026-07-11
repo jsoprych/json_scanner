@@ -10,11 +10,25 @@ const API = {
       },
     };
     
+    // Add auth token if available
+    const token = localStorage.getItem('auth_token');
+    if (token) {
+      options.headers['Authorization'] = 'Bearer ' + token;
+    }
+    
     if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
       options.body = JSON.stringify(data);
     }
     
     const response = await fetch(`${this.baseUrl}${path}`, options);
+    
+    // Handle unauthorized
+    if (response.status === 401) {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('user');
+      window.location.href = '/admin/login';
+      return;
+    }
     
     if (!response.ok) {
       const error = await response.json();

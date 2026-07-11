@@ -53,7 +53,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Static files
 	mux.Handle("/admin/static/", http.FileServer(http.FS(staticFS)))
 
-	// Pages
+	// Login page (no auth required)
+	mux.HandleFunc("/admin/login", h.loginPage)
+	mux.HandleFunc("/admin/logout", h.logout)
+
+	// Protected pages
 	mux.HandleFunc("/admin", h.requireAdmin(h.dashboard))
 	mux.HandleFunc("/admin/dashboard", h.requireAdmin(h.dashboard))
 	mux.HandleFunc("/admin/users", h.requireAdmin(h.usersPage))
@@ -75,18 +79,67 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 // Middleware
 func (h *Handler) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// TODO: Check if user is authenticated and has admin role
-		// For now, just pass through
+		// Check for auth token in header or cookie
+		token := r.Header.Get("Authorization")
+		if token == "" {
+			// Try cookie
+			if cookie, err := r.Cookie("auth_token"); err == nil {
+				token = "Bearer " + cookie.Value
+			}
+		}
+
+		if token == "" {
+			// No token, redirect to login
+			http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
+			return
+		}
+
+		// TODO: Validate JWT token and check admin role
+		// For now, just check if token exists
 		next(w, r)
 	}
 }
 
 func (h *Handler) requireAdminAPI(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// TODO: Check if user is authenticated and has admin role
-		// For now, just pass through
+		// Check for auth token
+		token := r.Header.Get("Authorization")
+		if token == "" {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// TODO: Validate JWT token and check admin role
+		// For now, just check if token exists
 		next(w, r)
 	}
+}
+
+// Login page
+func (h *Handler) loginPage(w http.ResponseWriter, r *http.Request) {
+	content, err := templatesFS.ReadFile("templates/login.html")
+	if err != nil {
+		http.Error(w, "Template not found", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	w.Write(content)
+}
+
+// Logout
+func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
+	// Clear cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "auth_token",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+	})
+
+	// Redirect to login
+	http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
 }
 
 // Page Handlers
