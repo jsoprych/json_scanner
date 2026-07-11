@@ -10,7 +10,7 @@ import (
 
 func TestDetectEntries(t *testing.T) {
 	// Create in-memory snapshot DB
-	snap, err := snapshot.Open("")
+	snap, err := snapshot.OpenTest("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestDetectEntries(t *testing.T) {
 }
 
 func TestDetectExits(t *testing.T) {
-	snap, err := snapshot.Open("")
+	snap, err := snapshot.OpenTest("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestDetectExits(t *testing.T) {
 }
 
 func TestDetectChanges(t *testing.T) {
-	snap, err := snapshot.Open("")
+	snap, err := snapshot.OpenTest("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestDetectChanges(t *testing.T) {
 }
 
 func TestDetectEntriesNoPrevDate(t *testing.T) {
-	snap, err := snapshot.Open("")
+	snap, err := snapshot.OpenTest("")
 	if err != nil {
 		t.Fatal(err)
 	}

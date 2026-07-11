@@ -19,7 +19,7 @@ func TestRenderFromStudies(t *testing.T) {
 			SMA50: 3.2, SMA200: 3.5, IsOversoldBounce: true, High52w: 9},
 	}
 
-	snap, err := snapshot.Open("")
+	snap, err := snapshot.OpenTest("")
 	if err != nil {
 		t.Fatal(err)
 	}

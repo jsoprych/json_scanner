@@ -16,7 +16,7 @@ import (
 )
 
 func setupUserTest(t *testing.T) (*Handler, *user.Store, string) {
-	snap, err := snapshot.Open(":memory:")
+	snap, err := snapshot.OpenTest(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}

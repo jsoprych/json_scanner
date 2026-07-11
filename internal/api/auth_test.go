@@ -16,7 +16,7 @@ import (
 )
 
 func TestLoginEndpoint(t *testing.T) {
-	snap, err := snapshot.Open(":memory:")
+	snap, err := snapshot.OpenTest(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestLoginEndpoint(t *testing.T) {
 }
 
 func TestMeEndpoint(t *testing.T) {
-	snap, err := snapshot.Open(":memory:")
+	snap, err := snapshot.OpenTest(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}

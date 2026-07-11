@@ -20,7 +20,7 @@ func TestLoadAndRun(t *testing.T) {
 			IsGoldenCross: false, High52w: math.NaN()},
 	}
 
-	db, err := Open("") // in-memory
+	db, err := OpenTest("") // in-memory
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestSnapshotHistory(t *testing.T) {
 		{Symbol: "GOOG", Close: 2800, DollarVol: 3e9, Ret3m: 0.3, RSI14: 75, High52w: 2850},
 	}
 
-	db, err := Open("")
+	db, err := OpenTest("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestCleanup(t *testing.T) {
 		{Symbol: "AAPL", Close: 150, DollarVol: 1e9},
 	}
 
-	db, err := Open("")
+	db, err := OpenTest("")
 	if err != nil {
 		t.Fatal(err)
 	}

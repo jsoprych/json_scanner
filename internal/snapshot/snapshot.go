@@ -7,10 +7,12 @@ package snapshot
 import (
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"math"
 	"strings"
 	"time"
 
+	"cetus-marketdata-scanner/internal/dblog"
 	"cetus-marketdata-scanner/internal/screen"
 	"cetus-marketdata-scanner/internal/study"
 
@@ -19,12 +21,38 @@ import (
 
 // DB is a snapshot store.
 type DB struct {
-	db           *sql.DB
+	db           *dblog.DB
 	snapshotID   string
 	symbolCount  int
 	snapshotDate int64
-	activeDate   int64 // the snapshot_date used for Run queries
+	activeDate   int64
 }
+
+// Open opens a snapshot DB with logging.
+func Open(path string, log *slog.Logger) (*DB, error) {
+	dsn := ":memory:"
+	if path != "" && path != ":memory:" {
+		dsn = "file:" + path
+	}
+	rawDB, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, err
+	}
+	rawDB.SetMaxOpenConns(1)
+	db := dblog.New(rawDB, log)
+	return &DB{db: db}, nil
+}
+
+// OpenTest opens a snapshot DB for test use (no external logger).
+func OpenTest(path string) (*DB, error) {
+	return Open(path, slog.Default())
+}
+
+// Close releases the DB.
+func (d *DB) Close() error { return d.db.Close() }
+
+// RawDB returns the underlying *sql.DB for stores that need it.
+func (d *DB) RawDB() *sql.DB { return d.db.DB() }
 
 // SnapshotBatch represents a single snapshot to be batched.
 type SnapshotBatch struct {
@@ -32,27 +60,6 @@ type SnapshotBatch struct {
 	BarTs        int64
 	SnapshotDate int64
 }
-
-// Open opens a snapshot DB; path "" (or ":memory:") uses an in-memory DB. A single
-// connection is pinned so an in-memory table survives for the DB's lifetime.
-func Open(path string) (*DB, error) {
-	dsn := ":memory:"
-	if path != "" && path != ":memory:" {
-		dsn = "file:" + path
-	}
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, err
-	}
-	db.SetMaxOpenConns(1)
-	return &DB{db: db}, nil
-}
-
-// Close releases the DB.
-func (d *DB) Close() error { return d.db.Close() }
-
-// DB returns the underlying database connection.
-func (d *DB) DB() *sql.DB { return d.db }
 
 // createTableSQL is the single source of truth for the snapshot table schema.
 // All Load/LoadHistory methods use this constant via ensureTable().

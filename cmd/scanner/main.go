@@ -274,7 +274,7 @@ func scanAndBuild(ctx context.Context, log *slog.Logger, st *store.Store, univer
 		Since: since, MinDollarVol: 0, Workers: cfg.DigestWorkers, // studies set their own liquidity in SQL
 	}, log)
 
-	snap, err := snapshot.Open(cfg.StoreDB)
+	snap, err := snapshot.Open(cfg.StoreDB, log)
 	if err != nil {
 		return digest.Digest{}, res, fmt.Errorf("open store %q: %w", cfg.StoreDB, err)
 	}
@@ -401,7 +401,7 @@ func runStudies(ctx context.Context, log *slog.Logger, cfg config.Config, studyF
 	studies := study.Accessible(all, u)
 
 	// The scanner's OWN store — never the cetus warehouse.
-	snap, err := snapshot.Open(cfg.StoreDB)
+	snap, err := snapshot.Open(cfg.StoreDB, log)
 	if err != nil {
 		log.Error("open snapshot store failed", "store", cfg.StoreDB, "error", err)
 		os.Exit(1)
@@ -652,7 +652,7 @@ func runBackfill(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	st, universe := openUniverse(ctx, log, cfg)
 	defer st.Close()
 
-	snap, err := snapshot.Open(cfg.StoreDB)
+	snap, err := snapshot.Open(cfg.StoreDB, log)
 	if err != nil {
 		log.Error("open snapshot store failed", "store", cfg.StoreDB, "error", err)
 		os.Exit(1)
@@ -715,7 +715,7 @@ func runReplay(ctx context.Context, log *slog.Logger, cfg config.Config, dateStr
 	st, universe := openUniverse(ctx, log, cfg)
 	defer st.Close()
 
-	snap, err := snapshot.Open(cfg.StoreDB)
+	snap, err := snapshot.Open(cfg.StoreDB, log)
 	if err != nil {
 		log.Error("open snapshot store failed", "store", cfg.StoreDB, "error", err)
 		os.Exit(1)

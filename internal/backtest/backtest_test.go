@@ -9,7 +9,7 @@ import (
 )
 
 func TestRunBacktest(t *testing.T) {
-	snap, err := snapshot.Open("")
+	snap, err := snapshot.OpenTest("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestRunBacktest(t *testing.T) {
 }
 
 func TestRunPointInTime(t *testing.T) {
-	snap, err := snapshot.Open("")
+	snap, err := snapshot.OpenTest("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestRunPointInTime(t *testing.T) {
 }
 
 func TestCalculateReturn(t *testing.T) {
-	snap, err := snapshot.Open("")
+	snap, err := snapshot.OpenTest("")
 	if err != nil {
 		t.Fatal(err)
 	}

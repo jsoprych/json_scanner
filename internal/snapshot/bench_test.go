@@ -32,7 +32,7 @@ func synthRows(n int) []screen.SnapshotRow {
 func BenchmarkStudyRun(b *testing.B) {
 	for _, n := range []int{500, 3000, 14000} {
 		b.Run(fmt.Sprintf("rows=%d", n), func(b *testing.B) {
-			db, err := Open("")
+			db, err := OpenTest("")
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -55,7 +55,7 @@ func BenchmarkStudyRun(b *testing.B) {
 // BenchmarkLoad measures materializing N rows into the in-memory table.
 func BenchmarkLoad(b *testing.B) {
 	rows := synthRows(3000)
-	db, _ := Open("")
+	db, _ := OpenTest("")
 	defer db.Close()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

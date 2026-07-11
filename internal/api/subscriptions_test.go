@@ -17,7 +17,7 @@ import (
 )
 
 func setupSubscriptionTest(t *testing.T) (*Handler, *user.Store, *study.Store, *study.SubscriptionStore, string) {
-	snap, err := snapshot.Open(":memory:")
+	snap, err := snapshot.OpenTest(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}

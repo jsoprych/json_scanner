@@ -16,7 +16,7 @@ import (
 )
 
 func TestHealthEndpoint(t *testing.T) {
-	snap, err := snapshot.Open(":memory:")
+	snap, err := snapshot.OpenTest(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestHealthEndpoint(t *testing.T) {
 }
 
 func TestFeaturesEndpoint(t *testing.T) {
-	snap, err := snapshot.Open(":memory:")
+	snap, err := snapshot.OpenTest(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestFeaturesEndpoint(t *testing.T) {
 }
 
 func TestFeatureByIDEndpoint(t *testing.T) {
-	snap, err := snapshot.Open(":memory:")
+	snap, err := snapshot.OpenTest(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestFeatureByIDEndpoint(t *testing.T) {
 }
 
 func TestScanEndpoint(t *testing.T) {
-	snap, err := snapshot.Open(":memory:")
+	snap, err := snapshot.OpenTest(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestScanEndpoint(t *testing.T) {
 }
 
 func TestStudiesEndpoints(t *testing.T) {
-	snap, err := snapshot.Open(":memory:")
+	snap, err := snapshot.OpenTest(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +328,7 @@ func TestStudiesEndpoints(t *testing.T) {
 }
 
 func TestSnapshotsEndpoint(t *testing.T) {
-	snap, err := snapshot.Open(":memory:")
+	snap, err := snapshot.OpenTest(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}

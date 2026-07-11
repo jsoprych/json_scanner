@@ -19,7 +19,7 @@ import (
 )
 
 func setupAlertTest(t *testing.T) (*Handler, *user.Store, *study.Store, *snapshot.DB, string) {
-	snap, err := snapshot.Open(":memory:")
+	snap, err := snapshot.OpenTest(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
