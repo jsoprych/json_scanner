@@ -11,6 +11,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -87,6 +88,9 @@ func (u *User) SetPassword(pw string) {
 	u.PassHash = fmt.Sprintf("pbkdf2_sha256$%d$%s$%s", pbkdf2Iter, pwEnc.EncodeToString(salt), pwEnc.EncodeToString(dk))
 	u.PassSHA256 = ""
 }
+
+// HasPassword returns true if the user has a password set.
+func (u User) HasPassword() bool { return u.PassHash != "" || u.PassSHA256 != "" }
 
 // CheckPassword reports whether pw matches, in constant time. Prefers the PBKDF2
 // hash; falls back to the legacy unsalted sha256 for un-migrated accounts. A
@@ -197,11 +201,10 @@ func (r *Registry) Find(id string) (User, bool) {
 // All returns every user, in file order.
 func (r *Registry) All() []User { return r.all }
 
-// Store is a mutable, JSONL-file-backed user registry, safe for concurrent use.
-// The admin dashboard creates/updates/deletes through it; every mutation atomically
-// rewrites the file. (Migrates into the scanner's own DB with real accounts.)
+// Store is a mutable user registry backed by SQLite with JSONL fallback.
 type Store struct {
 	path string
+	db   *sql.DB // nil = JSONL-only (legacy)
 	mu   sync.Mutex
 	all  []User
 	byID map[string]User
@@ -209,24 +212,102 @@ type Store struct {
 
 // OpenStore loads a user store from path (a missing file yields an empty store).
 func OpenStore(path string) (*Store, error) {
-	s := &Store{path: path, byID: map[string]User{}}
-	f, err := os.Open(path)
+	return OpenStoreWithDB(path, nil)
+}
+
+// OpenStoreWithDB opens a SQLite-backed user store. If db is nil, uses JSONL only.
+func OpenStoreWithDB(path string, db *sql.DB) (*Store, error) {
+	s := &Store{path: path, db: db, byID: map[string]User{}}
+
+	// Try loading from SQLite first
+	if db != nil {
+		if err := s.loadFromSQL(); err != nil {
+			return nil, fmt.Errorf("load users from SQLite: %w", err)
+		}
+		// If SQLite is empty, seed from JSONL
+		if len(s.all) == 0 {
+			if err := s.loadFromJSONL(); err != nil {
+				return nil, err
+			}
+			// Seed SQLite from JSONL
+			for _, u := range s.all {
+				s.saveToSQL(u)
+			}
+		}
+		return s, nil
+	}
+
+	// JSONL-only fallback
+	if err := s.loadFromJSONL(); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+func (s *Store) loadFromSQL() error {
+	rows, err := s.db.Query("SELECT id, name, role_id, disabled FROM users ORDER BY id")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, name, roleID string
+		var disabled int
+		if err := rows.Scan(&id, &name, &roleID, &disabled); err != nil {
+			return err
+		}
+		u := User{
+			ID:       id,
+			Name:     name,
+			RoleID:   roleID,
+			Role:     Role(roleID),
+			Disabled: disabled != 0,
+		}
+		s.all = append(s.all, u)
+		s.byID[u.ID] = u
+	}
+	return rows.Err()
+}
+
+func (s *Store) loadFromJSONL() error {
+	f, err := os.Open(s.path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return s, nil
+			return nil
 		}
-		return nil, err
+		return err
 	}
 	defer f.Close()
 	reg, err := LoadJSONL(f)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	s.all = reg.all
 	for _, u := range s.all {
 		s.byID[u.ID] = u
 	}
-	return s, nil
+	return nil
+}
+
+func (s *Store) saveToSQL(u User) {
+	if s.db == nil {
+		return
+	}
+	roleID := u.RoleID
+	if roleID == "" {
+		roleID = string(u.Role)
+		if roleID == "" {
+			roleID = "user"
+		}
+	}
+	disabled := 0
+	if u.Disabled {
+		disabled = 1
+	}
+	s.db.Exec(
+		"INSERT OR REPLACE INTO users (id, name, role_id, disabled) VALUES (?, ?, ?, ?)",
+		u.ID, u.Name, roleID, disabled,
+	)
 }
 
 // All returns a copy of every user.
@@ -262,6 +343,7 @@ func (s *Store) Create(u User) error {
 	}
 	s.all = append(s.all, u)
 	s.byID[u.ID] = u
+	s.saveToSQL(u)
 	return s.save()
 }
 
@@ -273,6 +355,7 @@ func (s *Store) mutate(id string, fn func(*User)) error {
 		if s.all[i].ID == id {
 			fn(&s.all[i])
 			s.byID[id] = s.all[i]
+			s.saveToSQL(s.all[i])
 			return s.save()
 		}
 	}
@@ -307,6 +390,9 @@ func (s *Store) Delete(id string) error {
 		return fmt.Errorf("user %q not found", id)
 	}
 	delete(s.byID, id)
+	if s.db != nil {
+		s.db.Exec("DELETE FROM users WHERE id = ?", id)
+	}
 	out := s.all[:0]
 	for _, u := range s.all {
 		if u.ID != id {

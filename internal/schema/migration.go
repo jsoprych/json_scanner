@@ -171,13 +171,26 @@ func migrateToV2(db *sql.DB) error {
 	return tx.Commit()
 }
 
-// migrateToV3 adds roles and throttling tables
+// migrateToV3 adds roles, users table, and throttling tables
 func migrateToV3(db *sql.DB) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+
+	// Users table (SQLite-first — source of truth for throttle/permissions queries)
+	_, err = tx.Exec(`
+		CREATE TABLE IF NOT EXISTS users (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL DEFAULT '',
+			role_id TEXT NOT NULL DEFAULT 'user',
+			disabled INTEGER NOT NULL DEFAULT 0
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("create users table: %w", err)
+	}
 
 	// Roles table
 	_, err = tx.Exec(`

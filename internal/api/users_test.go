@@ -88,13 +88,16 @@ func TestListUsers(t *testing.T) {
 			t.Errorf("expected status 200, got %d", w.Code)
 		}
 
-		var users []user.User
-		if err := json.Unmarshal(w.Body.Bytes(), &users); err != nil {
+		var resp struct {
+			Users []user.User `json:"users"`
+			Count int         `json:"count"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 			t.Fatal(err)
 		}
 
-		if len(users) != 2 {
-			t.Errorf("expected 2 users, got %d", len(users))
+		if len(resp.Users) != 2 {
+			t.Errorf("expected 2 users, got %d", len(resp.Users))
 		}
 	})
 

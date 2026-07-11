@@ -33,6 +33,7 @@ import (
 	"cetus-marketdata-scanner/internal/results"
 	"cetus-marketdata-scanner/internal/roles"
 	"cetus-marketdata-scanner/internal/scan"
+	"cetus-marketdata-scanner/internal/schema"
 	"cetus-marketdata-scanner/internal/screen"
 	"cetus-marketdata-scanner/internal/sentinel"
 	"cetus-marketdata-scanner/internal/snapshot"
@@ -107,7 +108,14 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 		return nil, fmt.Errorf("open snapshot store: %w", err)
 	}
 
-	users, err := user.OpenStore(cfg.UsersPath)
+	// Run schema migrations (creates users, roles, groups, etc.)
+	if err := schema.Migrate(snap.DB()); err != nil {
+		st.Close()
+		snap.Close()
+		return nil, fmt.Errorf("migrate schema: %w", err)
+	}
+
+	users, err := user.OpenStoreWithDB(cfg.UsersPath, snap.DB())
 	if err != nil {
 		st.Close()
 		snap.Close()

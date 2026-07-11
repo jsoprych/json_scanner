@@ -18,17 +18,17 @@ func NewDBAccessChecker(db *sql.DB) *DBAccessChecker {
 
 // IsAdmin checks if a user has admin privileges
 func (c *DBAccessChecker) IsAdmin(ctx context.Context, userID string) (bool, error) {
-	var role string
+	var roleID string
 	err := c.db.QueryRowContext(ctx, `
-		SELECT role FROM users WHERE id = ?
-	`, userID).Scan(&role)
+		SELECT role_id FROM users WHERE id = ?
+	`, userID).Scan(&roleID)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("check admin: %w", err)
 	}
-	return role == "admin", nil
+	return roleID == "admin", nil
 }
 
 // IsOwner checks if a user owns a resource

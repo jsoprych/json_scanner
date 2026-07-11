@@ -7,12 +7,13 @@ import (
 	"time"
 
 	"cetus-marketdata-scanner/internal/roles"
+	"cetus-marketdata-scanner/internal/user"
 )
 
 // Throttler enforces rate limits and quotas
 type Throttler struct {
-	db         *sql.DB
-	roleStore  *roles.Store
+	db        *sql.DB
+	roleStore *roles.Store
 }
 
 // NewThrottler creates a new throttler
@@ -28,10 +29,9 @@ func (t *Throttler) Init() error {
 	// User-specific limit overrides
 	_, err := t.db.Exec(`
 		CREATE TABLE IF NOT EXISTS user_limits (
-			user_id TEXT PRIMARY KEY,
+			user_id TEXT PRIMARY KEY REFERENCES users(id),
 			limits_json TEXT NOT NULL,
-			updated_at INTEGER NOT NULL,
-			FOREIGN KEY (user_id) REFERENCES users(id)
+			updated_at INTEGER NOT NULL
 		)
 	`)
 	if err != nil {
@@ -74,9 +74,41 @@ func (t *Throttler) Init() error {
 	return err
 }
 
+// SeedUsers syncs file-based users into the SQLite users table.
+func (t *Throttler) SeedUsers(users *user.Store) {
+	all := users.All()
+	tx, err := t.db.Begin()
+	if err != nil {
+		return
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare("INSERT OR REPLACE INTO users (id, name, role_id, disabled) VALUES (?, ?, ?, ?)")
+	if err != nil {
+		return
+	}
+	defer stmt.Close()
+
+	for _, u := range all {
+		roleID := u.RoleID
+		if roleID == "" {
+			roleID = string(u.Role) // fall back to legacy Role field
+		}
+		if roleID == "" {
+			roleID = "user"
+		}
+		disabled := 0
+		if u.Disabled {
+			disabled = 1
+		}
+		stmt.Exec(u.ID, u.Name, roleID, disabled)
+	}
+	tx.Commit()
+}
+
 // CheckRateLimit checks if user has exceeded rate limits
 func (t *Throttler) CheckRateLimit(userID, action string) error {
-	// Get user role
+	// Get user role from SQLite (SQLite-first)
 	var roleID string
 	err := t.db.QueryRow("SELECT role_id FROM users WHERE id = ?", userID).Scan(&roleID)
 	if err != nil {
@@ -255,7 +287,7 @@ func (t *Throttler) GetEffectiveLimits(userID string) (*roles.Limits, error) {
 		}
 	}
 
-	// Fall back to role defaults
+	// Fall back to role defaults from SQLite users table
 	var roleID string
 	err = t.db.QueryRow("SELECT role_id FROM users WHERE id = ?", userID).Scan(&roleID)
 	if err != nil {

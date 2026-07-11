@@ -21,7 +21,11 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "ADMIN_ONLY", "admin access required")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.users.All())
+	users := h.users.All()
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"users": users,
+		"count": len(users),
+	})
 }
 
 // GetUser returns a user by ID.
