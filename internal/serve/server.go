@@ -216,7 +216,7 @@ func (s *Server) Run() {
 	defer s.warehouse.Close()
 	defer s.snap.Close()
 
-	mux := http.NewServeMux()
+	mux := newSafeMux()
 	s.registerRoutes(mux)
 
 	ln, err := net.Listen("tcp", s.cfg.ServeAddr)
@@ -224,7 +224,7 @@ func (s *Server) Run() {
 		s.log.Error("cannot bind dashboard address (port already in use?)", "addr", s.cfg.ServeAddr, "error", err)
 		os.Exit(1)
 	}
-	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{Handler: mux.ServeMux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-s.ctx.Done()
 		shCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

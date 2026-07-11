@@ -16,7 +16,36 @@ import (
 	"cetus-marketdata-scanner/internal/user"
 )
 
-func (s *Server) registerRoutes(mux *http.ServeMux) {
+// safeMux wraps http.ServeMux to track registered routes and prevent conflicts
+type safeMux struct {
+	*http.ServeMux
+	routes map[string]bool
+}
+
+func newSafeMux() *safeMux {
+	return &safeMux{
+		ServeMux: http.NewServeMux(),
+		routes:   make(map[string]bool),
+	}
+}
+
+func (m *safeMux) HandleFunc(pattern string, handler http.HandlerFunc) {
+	if m.routes[pattern] {
+		panic(fmt.Sprintf("route conflict: %q already registered", pattern))
+	}
+	m.routes[pattern] = true
+	m.ServeMux.HandleFunc(pattern, handler)
+}
+
+func (m *safeMux) Handle(pattern string, handler http.Handler) {
+	if m.routes[pattern] {
+		panic(fmt.Sprintf("route conflict: %q already registered", pattern))
+	}
+	m.routes[pattern] = true
+	m.ServeMux.Handle(pattern, handler)
+}
+
+func (s *Server) registerRoutes(mux *safeMux) {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
 
 	mux.HandleFunc("/manifest.webmanifest", func(w http.ResponseWriter, _ *http.Request) {
@@ -34,16 +63,12 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("/login", s.handleLogin)
 	mux.HandleFunc("/logout", s.handleLogout)
-	mux.HandleFunc("/admin/users", s.handleAdminUsers)
 	mux.HandleFunc("/studies/test", s.handleStudiesTest)
 	mux.HandleFunc("/api/scanner/catalog", s.handleCatalog)
 	mux.HandleFunc("/api/studies/compile", s.handleCompile)
 	mux.HandleFunc("/studies", s.handleStudies)
 	mux.HandleFunc("/studies/export", s.handleStudiesExport)
 	mux.HandleFunc("/studies/import", s.handleStudiesImport)
-	mux.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
-		s.page(w, r, true, func(m *dashboard.Model, out io.Writer) error { return m.AdminHTML(out) })
-	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
@@ -63,7 +88,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// Register admin panel routes
 	if s.admin != nil {
-		s.admin.RegisterRoutes(mux)
+		s.admin.RegisterRoutes(mux.ServeMux)
 	}
 }
 
