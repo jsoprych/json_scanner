@@ -2,6 +2,7 @@ package study
 
 import (
 	"bufio"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,36 +12,98 @@ import (
 	"cetus-marketdata-scanner/internal/user"
 )
 
-// Store is a mutable, JSONL-file-backed set of studies, safe for concurrent use.
-// The admin study editor creates/updates/deletes through it; every mutation
-// atomically rewrites the file, so edits take effect without a restart.
+// Store is a mutable set of studies backed by SQLite with JSONL fallback.
 type Store struct {
 	path  string
+	db    *sql.DB // nil = JSONL-only (legacy)
 	mu    sync.Mutex
 	all   []Study
 	byKey map[string]Study
 }
 
-// OpenStore loads studies from path (a missing file yields an empty store).
+// OpenStore loads studies from JSONL path (legacy, no DB).
 func OpenStore(path string) (*Store, error) {
-	s := &Store{path: path, byKey: map[string]Study{}}
-	f, err := os.Open(path)
+	return OpenStoreWithDB(path, nil)
+}
+
+// OpenStoreWithDB opens a SQLite-backed study store.
+func OpenStoreWithDB(path string, db *sql.DB) (*Store, error) {
+	s := &Store{path: path, db: db, byKey: map[string]Study{}}
+
+	if db != nil {
+		if err := s.loadFromSQL(); err != nil {
+			return nil, fmt.Errorf("load studies from SQLite: %w", err)
+		}
+		if len(s.all) == 0 {
+			if err := s.loadFromJSONL(); err != nil {
+				return nil, err
+			}
+			for _, st := range s.all {
+				s.saveToSQL(st)
+			}
+		}
+		return s, nil
+	}
+
+	if err := s.loadFromJSONL(); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+func (s *Store) loadFromSQL() error {
+	rows, err := s.db.Query("SELECT key, owner, visibility, group_name, tier, title, emoji, where_clause, order_by, limit_num FROM studies ORDER BY key")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var st Study
+		if err := rows.Scan(&st.Key, &st.Owner, &st.Visibility, &st.Group, &st.Tier, &st.Title, &st.Emoji, &st.Where, &st.OrderBy, &st.Limit); err != nil {
+			return err
+		}
+		s.all = append(s.all, st)
+		s.byKey[st.Key] = st
+	}
+	return rows.Err()
+}
+
+func (s *Store) loadFromJSONL() error {
+	f, err := os.Open(s.path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return s, nil
+			return nil
 		}
-		return nil, err
+		return err
 	}
 	defer f.Close()
 	all, err := LoadJSONL(f)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	s.all = all
 	for _, st := range all {
 		s.byKey[st.Key] = st
 	}
-	return s, nil
+	return nil
+}
+
+func (s *Store) saveToSQL(st Study) {
+	if s.db == nil {
+		return
+	}
+	visibility := string(st.Visibility)
+	if visibility == "" {
+		visibility = "private"
+	}
+	tier := string(st.Tier)
+	if tier == "" {
+		tier = "free"
+	}
+	s.db.Exec(
+		"INSERT OR REPLACE INTO studies (key, owner, visibility, group_name, tier, title, emoji, where_clause, order_by, limit_num) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		st.Key, st.Owner, visibility, st.Group, tier, st.Title, st.Emoji, st.Where, st.OrderBy, st.Limit,
+	)
 }
 
 // All returns a copy of every study.
@@ -93,6 +156,7 @@ func (s *Store) Upsert(st Study) error {
 		s.all = append(s.all, st)
 	}
 	s.byKey[st.Key] = st
+	s.saveToSQL(st)
 	return s.save()
 }
 
@@ -104,6 +168,9 @@ func (s *Store) Delete(key string) error {
 		return fmt.Errorf("study %q not found", key)
 	}
 	delete(s.byKey, key)
+	if s.db != nil {
+		s.db.Exec("DELETE FROM studies WHERE key = ?", key)
+	}
 	out := s.all[:0]
 	for _, st := range s.all {
 		if st.Key != key {

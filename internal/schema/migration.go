@@ -192,6 +192,37 @@ func migrateToV3(db *sql.DB) error {
 		return fmt.Errorf("create users table: %w", err)
 	}
 
+	// Studies table (SQLite-first — replaces studies.jsonl)
+	_, err = tx.Exec(`
+		CREATE TABLE IF NOT EXISTS studies (
+			key TEXT PRIMARY KEY,
+			owner TEXT NOT NULL DEFAULT 'global',
+			visibility TEXT NOT NULL DEFAULT 'private',
+			group_name TEXT NOT NULL DEFAULT '',
+			tier TEXT NOT NULL DEFAULT 'free',
+			title TEXT NOT NULL DEFAULT '',
+			emoji TEXT NOT NULL DEFAULT '',
+			where_clause TEXT NOT NULL DEFAULT '',
+			order_by TEXT NOT NULL DEFAULT '',
+			limit_num INTEGER NOT NULL DEFAULT 0
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("create studies table: %w", err)
+	}
+
+	// Subscriptions table (SQLite-first — replaces subscriptions.jsonl)
+	_, err = tx.Exec(`
+		CREATE TABLE IF NOT EXISTS subscriptions (
+			user_id TEXT NOT NULL,
+			study_key TEXT NOT NULL,
+			PRIMARY KEY (user_id, study_key)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("create subscriptions table: %w", err)
+	}
+
 	// Roles table
 	_, err = tx.Exec(`
 		CREATE TABLE IF NOT EXISTS roles (

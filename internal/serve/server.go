@@ -122,14 +122,14 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 		return nil, fmt.Errorf("open users: %w", err)
 	}
 
-	studyStore, err := study.OpenStore(cfg.StudiesPath)
+	studyStore, err := study.OpenStoreWithDB(cfg.StudiesPath, snap.DB())
 	if err != nil {
 		st.Close()
 		snap.Close()
 		return nil, fmt.Errorf("open studies: %w", err)
 	}
 
-	subStore, err := study.OpenSubscriptionStore(cfg.SubscriptionsPath)
+	subStore, err := study.OpenSubscriptionStoreWithDB(cfg.SubscriptionsPath, snap.DB())
 	if err != nil {
 		st.Close()
 		snap.Close()

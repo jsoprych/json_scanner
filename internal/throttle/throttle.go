@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"cetus-marketdata-scanner/internal/roles"
-	"cetus-marketdata-scanner/internal/user"
 )
 
 // Throttler enforces rate limits and quotas
@@ -72,38 +71,6 @@ func (t *Throttler) Init() error {
 		ON rate_limits(timestamp)
 	`)
 	return err
-}
-
-// SeedUsers syncs file-based users into the SQLite users table.
-func (t *Throttler) SeedUsers(users *user.Store) {
-	all := users.All()
-	tx, err := t.db.Begin()
-	if err != nil {
-		return
-	}
-	defer tx.Rollback()
-
-	stmt, err := tx.Prepare("INSERT OR REPLACE INTO users (id, name, role_id, disabled) VALUES (?, ?, ?, ?)")
-	if err != nil {
-		return
-	}
-	defer stmt.Close()
-
-	for _, u := range all {
-		roleID := u.RoleID
-		if roleID == "" {
-			roleID = string(u.Role) // fall back to legacy Role field
-		}
-		if roleID == "" {
-			roleID = "user"
-		}
-		disabled := 0
-		if u.Disabled {
-			disabled = 1
-		}
-		stmt.Exec(u.ID, u.Name, roleID, disabled)
-	}
-	tx.Commit()
 }
 
 // CheckRateLimit checks if user has exceeded rate limits

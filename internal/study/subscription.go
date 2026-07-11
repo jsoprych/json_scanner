@@ -1,7 +1,7 @@
 package study
 
 import (
-	"bufio"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,43 +14,134 @@ type Subscription struct {
 	StudyKey string `json:"study_key"`
 }
 
-// SubscriptionStore manages user subscriptions to studies.
+// SubscriptionStore manages user subscriptions backed by SQLite with JSONL fallback.
 type SubscriptionStore struct {
 	path string
+	db   *sql.DB // nil = JSONL-only (legacy)
 	mu   sync.RWMutex
 	subs map[string]map[string]bool // userID -> studyKey -> exists
 }
 
-// OpenSubscriptionStore opens or creates a subscription store at the given path.
+// OpenSubscriptionStore opens a subscription store at the given path (legacy, no DB).
 func OpenSubscriptionStore(path string) (*SubscriptionStore, error) {
+	return OpenSubscriptionStoreWithDB(path, nil)
+}
+
+// OpenSubscriptionStoreWithDB opens a SQLite-backed subscription store.
+func OpenSubscriptionStoreWithDB(path string, db *sql.DB) (*SubscriptionStore, error) {
 	s := &SubscriptionStore{
 		path: path,
+		db:   db,
 		subs: make(map[string]map[string]bool),
 	}
 
-	// Try to load existing subscriptions
-	f, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return s, nil
+	if db != nil {
+		if err := s.loadFromSQL(); err != nil {
+			return nil, fmt.Errorf("load subscriptions from SQLite: %w", err)
 		}
+		if len(s.subs) == 0 {
+			if err := s.loadFromJSONL(); err != nil {
+				return nil, err
+			}
+			s.seedSQL()
+		}
+		return s, nil
+	}
+
+	if err := s.loadFromJSONL(); err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	return s, nil
+}
 
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
+func (s *SubscriptionStore) loadFromSQL() error {
+	rows, err := s.db.Query("SELECT user_id, study_key FROM subscriptions ORDER BY user_id, study_key")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var userID, studyKey string
+		if err := rows.Scan(&userID, &studyKey); err != nil {
+			return err
+		}
+		if s.subs[userID] == nil {
+			s.subs[userID] = make(map[string]bool)
+		}
+		s.subs[userID][studyKey] = true
+	}
+	return rows.Err()
+}
+
+func (s *SubscriptionStore) loadFromJSONL() error {
+	f, err := os.Open(s.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer f.Close()
+	
+	// simple line-by-line read for JSONL
+	data, err := os.ReadFile(s.path)
+	if err != nil {
+		return nil
+	}
+	lines := splitLines(string(data))
+	for _, line := range lines {
 		var sub Subscription
-		if err := json.Unmarshal(scanner.Bytes(), &sub); err != nil {
-			continue // skip malformed lines
+		if err := json.Unmarshal([]byte(line), &sub); err != nil {
+			continue
 		}
 		if s.subs[sub.UserID] == nil {
 			s.subs[sub.UserID] = make(map[string]bool)
 		}
 		s.subs[sub.UserID][sub.StudyKey] = true
 	}
+	return nil
+}
 
-	return s, scanner.Err()
+func (s *SubscriptionStore) seedSQL() {
+	if s.db == nil {
+		return
+	}
+	for userID, studies := range s.subs {
+		for studyKey := range studies {
+			s.db.Exec("INSERT OR IGNORE INTO subscriptions (user_id, study_key) VALUES (?, ?)", userID, studyKey)
+		}
+	}
+}
+
+func splitLines(s string) []string {
+	var lines []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			line := trimSpace(s[start:i])
+			if line != "" {
+				lines = append(lines, line)
+			}
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		line := trimSpace(s[start:])
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+func trimSpace(s string) string {
+	for len(s) > 0 && (s[0] == ' ' || s[0] == '\r' || s[0] == '\t') {
+		s = s[1:]
+	}
+	for len(s) > 0 && (s[len(s)-1] == ' ' || s[len(s)-1] == '\r' || s[len(s)-1] == '\t') {
+		s = s[:len(s)-1]
+	}
+	return s
 }
 
 // Subscribe adds a subscription for a user to a study.
@@ -63,6 +154,9 @@ func (s *SubscriptionStore) Subscribe(userID, studyKey string) error {
 	}
 	s.subs[userID][studyKey] = true
 
+	if s.db != nil {
+		s.db.Exec("INSERT OR IGNORE INTO subscriptions (user_id, study_key) VALUES (?, ?)", userID, studyKey)
+	}
 	return s.save()
 }
 
@@ -78,6 +172,9 @@ func (s *SubscriptionStore) Unsubscribe(userID, studyKey string) error {
 		}
 	}
 
+	if s.db != nil {
+		s.db.Exec("DELETE FROM subscriptions WHERE user_id = ? AND study_key = ?", userID, studyKey)
+	}
 	return s.save()
 }
 
