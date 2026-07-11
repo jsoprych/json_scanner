@@ -23,6 +23,7 @@ import (
 	"cetus-marketdata-scanner/internal/api"
 	"cetus-marketdata-scanner/internal/authjwt"
 	"cetus-marketdata-scanner/internal/backtest"
+	"cetus-marketdata-scanner/internal/bootstrap"
 	"cetus-marketdata-scanner/internal/config"
 	"cetus-marketdata-scanner/internal/dashboard"
 	"cetus-marketdata-scanner/internal/digest"
@@ -179,6 +180,11 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 	}
 	if err := rolesStore.Bootstrap("roles.json"); err != nil {
 		return nil, fmt.Errorf("bootstrap roles: %w", err)
+	}
+
+	// Bootstrap default admin user if no users exist
+	if err := bootstrap.Bootstrap(snap.DB(), users, rolesStore, log); err != nil {
+		return nil, fmt.Errorf("bootstrap users: %w", err)
 	}
 
 	throttler := throttle.NewThrottler(snap.DB(), rolesStore)
