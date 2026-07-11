@@ -8,7 +8,7 @@
   <!-- Alpine.js - 15kb, no build step -->
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
-<body x-data="{ sidebarOpen: false, currentUser: '' }" x-init="currentUser = JSON.parse(localStorage.getItem('user') || '{}').id || ''">
+<body x-data="{ sidebarOpen: false, currentUser: '{{.CurrentUser}}' }" x-init="if (!currentUser) window.location.href='/login'">
   <div class="app-container">
     <!-- Sidebar -->
     <aside class="sidebar" :class="{ 'open': sidebarOpen }">

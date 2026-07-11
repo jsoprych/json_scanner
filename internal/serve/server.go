@@ -192,8 +192,23 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 		return nil, fmt.Errorf("init throttler: %w", err)
 	}
 
-	// Initialize admin panel
-	adminHandler, err := admin.NewHandler(snap.DB(), users, rolesStore, throttler, log)
+	// Initialize session store
+	sessions := newSessionStore()
+	
+	// Initialize admin panel with session validator
+	validateSession := func(cookie string) (userID string, isAdmin bool, valid bool) {
+		uid, ok := sessions.get(cookie)
+		if !ok {
+			return "", false, false
+		}
+		user, ok := users.Find(uid)
+		if !ok {
+			return "", false, false
+		}
+		return user.ID, user.IsAdmin(), true
+	}
+	
+	adminHandler, err := admin.NewHandler(snap.DB(), users, rolesStore, throttler, log, validateSession)
 	if err != nil {
 		return nil, fmt.Errorf("init admin: %w", err)
 	}
@@ -204,7 +219,7 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 		groups: groupsStore, results: resultsStore, permCheck: permChecker,
 		roles: rolesStore, throttler: throttler, admin: adminHandler,
 		jwtVer: jwtVer, signer: apiSigner,
-		sessions:     newSessionStore(),
+		sessions:     sessions,
 		sessTTL:      time.Duration(cfg.SessionHours) * time.Hour,
 		ttl:          time.Duration(cfg.ServeTTLSecs) * time.Second,
 		catalogBytes: catalogBytes,

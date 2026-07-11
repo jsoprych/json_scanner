@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"encoding/json"
@@ -29,22 +30,26 @@ type Handler struct {
 	throttler *throttle.Throttler
 	templates *template.Template
 	log       *slog.Logger
+	
+	// Session validator function (provided by serve package)
+	validateSession func(cookie string) (userID string, isAdmin bool, valid bool)
 }
 
 // NewHandler creates a new admin handler
-func NewHandler(db *sql.DB, users *user.Store, roles *roles.Store, throttler *throttle.Throttler, log *slog.Logger) (*Handler, error) {
+func NewHandler(db *sql.DB, users *user.Store, roles *roles.Store, throttler *throttle.Throttler, log *slog.Logger, validateSession func(cookie string) (userID string, isAdmin bool, valid bool)) (*Handler, error) {
 	tmpl, err := template.ParseFS(templatesFS, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
 	}
 
 	return &Handler{
-		db:        db,
-		users:     users,
-		roles:     roles,
-		throttler: throttler,
-		templates: tmpl,
-		log:       log,
+		db:              db,
+		users:           users,
+		roles:           roles,
+		throttler:       throttler,
+		templates:       tmpl,
+		log:             log,
+		validateSession: validateSession,
 	}, nil
 }
 
@@ -53,8 +58,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Static files
 	mux.Handle("/admin/static/", http.FileServer(http.FS(staticFS)))
 
-	// Login page (no auth required)
-	mux.HandleFunc("/admin/login", h.loginPage)
+	// Logout
 	mux.HandleFunc("/admin/logout", h.logout)
 
 	// Protected pages
@@ -79,129 +83,121 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 // Middleware
 func (h *Handler) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Check for auth token in header or cookie
-		token := r.Header.Get("Authorization")
-		if token == "" {
-			// Try cookie
-			if cookie, err := r.Cookie("auth_token"); err == nil {
-				token = "Bearer " + cookie.Value
-			}
-		}
-
-		if token == "" {
-			// No token, redirect to login
-			http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
+		// Check for session cookie (from main dashboard login)
+		cookie, err := r.Cookie("cetus_session")
+		if err != nil {
+			// No session cookie, redirect to main login
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
 
-		// TODO: Validate JWT token and check admin role
-		// For now, just check if token exists
+		// Validate session using the provided validator
+		if h.validateSession == nil {
+			h.log.Error("session validator not configured")
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+
+		userID, isAdmin, valid := h.validateSession(cookie.Value)
+		if !valid {
+			// Invalid session, redirect to main login
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+
+		if !isAdmin {
+			// Valid session but not admin
+			http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+			return
+		}
+
+		// Store user ID in request context for later use
+		r = r.WithContext(context.WithValue(r.Context(), "userID", userID))
 		next(w, r)
 	}
 }
 
 func (h *Handler) requireAdminAPI(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Check for auth token
-		token := r.Header.Get("Authorization")
-		if token == "" {
+		// Check for session cookie (from main dashboard login)
+		cookie, err := r.Cookie("cetus_session")
+		if err != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		// TODO: Validate JWT token and check admin role
-		// For now, just check if token exists
+		// Validate session using the provided validator
+		if h.validateSession == nil {
+			h.log.Error("session validator not configured")
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		userID, isAdmin, valid := h.validateSession(cookie.Value)
+		if !valid {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		if !isAdmin {
+			http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+			return
+		}
+
+		// Store user ID in request context for later use
+		r = r.WithContext(context.WithValue(r.Context(), "userID", userID))
 		next(w, r)
 	}
 }
 
-// Login page
-func (h *Handler) loginPage(w http.ResponseWriter, r *http.Request) {
-	content, err := templatesFS.ReadFile("templates/login.html")
-	if err != nil {
-		http.Error(w, "Template not found", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	w.Write(content)
-}
-
 // Logout
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
-	// Clear cookie
-	http.SetCookie(w, &http.Cookie{
-		Name:     "auth_token",
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HttpOnly: true,
-	})
-
-	// Redirect to login
-	http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
+	// Redirect to main logout which will clear the session cookie
+	http.Redirect(w, r, "/logout", http.StatusSeeOther)
 }
 
 // Page Handlers
 func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
-	content, err := templatesFS.ReadFile("templates/dashboard.html")
-	if err != nil {
-		http.Error(w, "Template not found", http.StatusInternalServerError)
-		return
-	}
-
-	data := struct {
-		Content template.HTML
-	}{
-		Content: template.HTML(content),
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	h.templates.ExecuteTemplate(w, "base.html", data)
+	h.renderPage(w, r, "templates/dashboard.html")
 }
 
 func (h *Handler) usersPage(w http.ResponseWriter, r *http.Request) {
-	content, err := templatesFS.ReadFile("templates/users.html")
-	if err != nil {
-		http.Error(w, "Template not found", http.StatusInternalServerError)
-		return
-	}
-
-	data := struct {
-		Content template.HTML
-	}{
-		Content: template.HTML(content),
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	h.templates.ExecuteTemplate(w, "base.html", data)
+	h.renderPage(w, r, "templates/users.html")
 }
 
 func (h *Handler) rolesPage(w http.ResponseWriter, r *http.Request) {
-	content, err := templatesFS.ReadFile("templates/roles.html")
+	h.renderPage(w, r, "templates/roles.html")
+}
+
+func (h *Handler) groupsPage(w http.ResponseWriter, r *http.Request) {
+	h.renderPage(w, r, "templates/groups.html")
+}
+
+func (h *Handler) monitoringPage(w http.ResponseWriter, r *http.Request) {
+	h.renderPage(w, r, "templates/monitoring.html")
+}
+
+// renderPage renders a template with the current user info
+func (h *Handler) renderPage(w http.ResponseWriter, r *http.Request, templateFile string) {
+	content, err := templatesFS.ReadFile(templateFile)
 	if err != nil {
 		http.Error(w, "Template not found", http.StatusInternalServerError)
 		return
 	}
 
+	// Get user ID from request context (set by requireAdmin middleware)
+	userID, _ := r.Context().Value("userID").(string)
+
 	data := struct {
-		Content template.HTML
+		Content     template.HTML
+		CurrentUser string
 	}{
-		Content: template.HTML(content),
+		Content:     template.HTML(content),
+		CurrentUser: userID,
 	}
 
 	w.Header().Set("Content-Type", "text/html")
 	h.templates.ExecuteTemplate(w, "base.html", data)
-}
-
-func (h *Handler) groupsPage(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement groups page
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
-}
-
-func (h *Handler) monitoringPage(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement monitoring page
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
 }
 
 // API Handlers

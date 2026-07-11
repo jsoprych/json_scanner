@@ -1,4 +1,4 @@
-// API Client Module
+// API Client Module - uses session cookie for auth (browser sends it automatically)
 const API = {
   baseUrl: '/api/v1',
   
@@ -8,13 +8,8 @@ const API = {
       headers: {
         'Content-Type': 'application/json',
       },
+      credentials: 'same-origin',  // send session cookie
     };
-    
-    // Add auth token if available
-    const token = localStorage.getItem('auth_token');
-    if (token) {
-      options.headers['Authorization'] = 'Bearer ' + token;
-    }
     
     if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
       options.body = JSON.stringify(data);
@@ -22,11 +17,9 @@ const API = {
     
     const response = await fetch(`${this.baseUrl}${path}`, options);
     
-    // Handle unauthorized
+    // Handle unauthorized (session expired)
     if (response.status === 401) {
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('user');
-      window.location.href = '/admin/login';
+      window.location.href = '/login';
       return;
     }
     
