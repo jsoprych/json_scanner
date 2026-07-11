@@ -57,7 +57,7 @@ func setupUserTest(t *testing.T) (*Handler, *user.Store, string) {
 	verifier := authjwt.NewHMAC(secret, "sub", "test", "")
 
 	log := telemetry.New(io.Discard)
-	h := NewHandlerFull(snap, nil, nil, userStore, nil, nil, nil, signer, verifier, log)
+	h := NewHandlerFull(snap, nil, nil, userStore, nil, nil, nil, nil, nil, nil, nil, nil, signer, verifier, log)
 
 	// Login as admin to get token
 	loginBody := bytes.NewBufferString(`{"user": "admin", "password": "adminpass"}`)

@@ -25,13 +25,18 @@ import (
 	"cetus-marketdata-scanner/internal/config"
 	"cetus-marketdata-scanner/internal/dashboard"
 	"cetus-marketdata-scanner/internal/digest"
+	"cetus-marketdata-scanner/internal/groups"
+	"cetus-marketdata-scanner/internal/permissions"
 	"cetus-marketdata-scanner/internal/predicate"
+	"cetus-marketdata-scanner/internal/results"
+	"cetus-marketdata-scanner/internal/roles"
 	"cetus-marketdata-scanner/internal/scan"
 	"cetus-marketdata-scanner/internal/screen"
 	"cetus-marketdata-scanner/internal/sentinel"
 	"cetus-marketdata-scanner/internal/snapshot"
 	"cetus-marketdata-scanner/internal/store"
 	"cetus-marketdata-scanner/internal/study"
+	"cetus-marketdata-scanner/internal/throttle"
 	"cetus-marketdata-scanner/internal/user"
 )
 
@@ -53,6 +58,11 @@ type Server struct {
 	users     *user.Store
 	studies   *study.Store
 	subs      *study.SubscriptionStore
+	groups    *groups.Store
+	results   *results.Store
+	roles     *roles.Store
+	throttler *throttle.Throttler
+	permCheck *permissions.Checker
 
 	jwtVer interface {
 		Verify(string) (string, error)
@@ -155,9 +165,30 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 
 	catalogBytes, _ := json.Marshal(predicate.BuildCatalog())
 
+	// Initialize groups and results stores
+	groupsStore := groups.NewStore(snap.DB())
+	resultsStore := results.NewStore(snap.DB())
+	permChecker := permissions.NewChecker(permissions.NewDBAccessChecker(snap.DB()))
+
+	// Initialize roles and throttling
+	rolesStore := roles.NewStore(snap.DB())
+	if err := rolesStore.Init(); err != nil {
+		return nil, fmt.Errorf("init roles: %w", err)
+	}
+	if err := rolesStore.Bootstrap("roles.json"); err != nil {
+		return nil, fmt.Errorf("bootstrap roles: %w", err)
+	}
+
+	throttler := throttle.NewThrottler(snap.DB(), rolesStore)
+	if err := throttler.Init(); err != nil {
+		return nil, fmt.Errorf("init throttler: %w", err)
+	}
+
 	return &Server{
 		cfg: cfg, log: log, ctx: ctx,
 		warehouse: st, snap: snap, users: users, studies: studyStore, subs: subStore,
+		groups: groupsStore, results: resultsStore, permCheck: permChecker,
+		roles: rolesStore, throttler: throttler,
 		jwtVer: jwtVer, signer: apiSigner,
 		sessions:     newSessionStore(),
 		sessTTL:      time.Duration(cfg.SessionHours) * time.Hour,

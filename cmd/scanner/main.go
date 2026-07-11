@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"cetus-marketdata-scanner/internal/backtest"
 	"cetus-marketdata-scanner/internal/config"
 	"cetus-marketdata-scanner/internal/digest"
 	"cetus-marketdata-scanner/internal/scan"
@@ -46,6 +47,7 @@ func main() {
 	var studyFile string
 	var outputFormat string
 	var forceRescan bool
+	var replayDate string
 	if len(os.Args) > 1 {
 		for i := 1; i < len(os.Args); i++ {
 			if os.Args[i] == "--study" && i+1 < len(os.Args) {
@@ -62,6 +64,11 @@ func main() {
 				forceRescan = true
 				// Remove --force from args
 				os.Args = append(os.Args[:i], os.Args[i+1:]...)
+				i-- // Adjust index since we removed elements
+			} else if os.Args[i] == "--date" && i+1 < len(os.Args) {
+				replayDate = os.Args[i+1]
+				// Remove --date and its value from args
+				os.Args = append(os.Args[:i], os.Args[i+2:]...)
 				i-- // Adjust index since we removed elements
 			}
 		}
@@ -91,8 +98,10 @@ func main() {
 		runUsers(log, cfg)
 	case "backfill":
 		runBackfill(ctx, log, cfg)
+	case "replay":
+		runReplay(ctx, log, cfg, replayDate)
 	default:
-		log.Error("unknown subcommand", "arg", sub, "want", "scan|digest|serve|anomalies|studies|users|backfill")
+		log.Error("unknown subcommand", "arg", sub, "want", "scan|digest|serve|anomalies|studies|users|backfill|replay")
 		os.Exit(2)
 	}
 }
@@ -688,4 +697,87 @@ func runServe(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		os.Exit(1)
 	}
 	srv.Run()
+}
+
+// runReplay runs a historical scan and calculates P/L to current date.
+func runReplay(ctx context.Context, log *slog.Logger, cfg config.Config, dateStr string) {
+	if dateStr == "" {
+		log.Error("--date flag required for replay")
+		os.Exit(1)
+	}
+
+	scanDate, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		log.Error("invalid date format", "date", dateStr, "want", "YYYY-MM-DD")
+		os.Exit(1)
+	}
+
+	st, universe := openUniverse(ctx, log, cfg)
+	defer st.Close()
+
+	snap, err := snapshot.Open(cfg.StoreDB)
+	if err != nil {
+		log.Error("open snapshot store failed", "store", cfg.StoreDB, "error", err)
+		os.Exit(1)
+	}
+	defer snap.Close()
+
+	scanCfg := scanner.Config{
+		Lookback:   cfg.Lookback,
+		VolumeMult: cfg.VolumeMult,
+		GapPct:     cfg.GapPct,
+	}
+
+	log.Info("replay starting", "date", scanDate.Format("2006-01-02"), "symbols", len(universe))
+
+	result, err := backtest.ReplayHistoricalScan(ctx, st, snap, universe, scanDate, scanCfg, log)
+	if err != nil {
+		log.Error("replay failed", "error", err)
+		os.Exit(1)
+	}
+
+	// Output results
+	fmt.Printf("\n")
+	fmt.Printf("═══════════════════════════════════════════════════════════════\n")
+	fmt.Printf("  HISTORICAL SCAN REPLAY\n")
+	fmt.Printf("═══════════════════════════════════════════════════════════════\n")
+	fmt.Printf("  Scan Date:    %s\n", result.ScanDate.Format("2006-01-02"))
+	fmt.Printf("  Current Date: %s\n", result.CurrentDate.Format("2006-01-02"))
+	fmt.Printf("  Symbols:      %d\n", len(universe))
+	fmt.Printf("═══════════════════════════════════════════════════════════════\n")
+	fmt.Printf("\n")
+
+	if len(result.Signals) == 0 {
+		fmt.Printf("No signals found on %s\n", scanDate.Format("2006-01-02"))
+		return
+	}
+
+	// Group signals by type
+	byType := make(map[string][]backtest.HistoricalSignal)
+	for _, sig := range result.Signals {
+		byType[sig.Type] = append(byType[sig.Type], sig)
+	}
+
+	for sigType, signals := range byType {
+		fmt.Printf("%s signals (%d):\n", strings.ToUpper(sigType), len(signals))
+		for _, sig := range signals {
+			retStr := fmt.Sprintf("%+.1f%%", sig.Return*100)
+			profitStr := fmt.Sprintf("+%.1f%%", sig.MaxProfit*100)
+			lossStr := fmt.Sprintf("%.1f%%", sig.MaxLoss*100)
+			fmt.Printf("  %-8s  entry=$%.2f  current=$%.2f  %s  max:%s/%s\n",
+				sig.Symbol, sig.EntryPx, sig.CurrentPx, retStr, profitStr, lossStr)
+		}
+		fmt.Printf("\n")
+	}
+
+	// Summary
+	fmt.Printf("═══════════════════════════════════════════════════════════════\n")
+	fmt.Printf("  SUMMARY\n")
+	fmt.Printf("═══════════════════════════════════════════════════════════════\n")
+	fmt.Printf("  Total Signals: %d\n", result.Summary.TotalSignals)
+	fmt.Printf("  Winners:       %d (%.1f%%)\n", result.Summary.Winners, result.Summary.WinRate*100)
+	fmt.Printf("  Losers:        %d\n", result.Summary.Losers)
+	fmt.Printf("  Avg Return:    %+.2f%%\n", result.Summary.AvgReturn*100)
+	fmt.Printf("  Total Return:  %+.2f%%\n", result.Summary.TotalReturn*100)
+	fmt.Printf("═══════════════════════════════════════════════════════════════\n")
 }

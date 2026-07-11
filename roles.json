@@ -1,0 +1,123 @@
+[
+  {
+    "id": "admin",
+    "name": "Administrator",
+    "description": "Full system access with user/group management",
+    "capabilities": [
+      "user.create", "user.read", "user.update", "user.delete",
+      "group.create", "group.read", "group.update", "group.delete",
+      "study.create", "study.read", "study.update", "study.delete",
+      "result.create", "result.read", "result.update", "result.delete",
+      "system.admin"
+    ],
+    "limits": {
+      "api_calls_per_minute": 1000,
+      "api_calls_per_hour": 50000,
+      "api_calls_per_day": 1000000,
+      "max_studies": 1000,
+      "max_saved_results": 10000,
+      "max_groups": 100,
+      "max_group_members": 1000,
+      "replay_days": 365,
+      "max_symbols_per_scan": 10000,
+      "export_max_results": 100000
+    },
+    "default_permissions": {
+      "owner": 7,
+      "group": 7,
+      "all": 7
+    },
+    "can_manage_users": true,
+    "can_manage_groups": true,
+    "bypass_throttling": true
+  },
+  {
+    "id": "group_admin",
+    "name": "Group Administrator",
+    "description": "Can manage groups they own",
+    "capabilities": [
+      "group.create", "group.read", "group.update", "group.delete",
+      "study.create", "study.read", "study.update", "study.delete",
+      "result.create", "result.read", "result.update", "result.delete"
+    ],
+    "limits": {
+      "api_calls_per_minute": 200,
+      "api_calls_per_hour": 5000,
+      "api_calls_per_day": 50000,
+      "max_studies": 100,
+      "max_saved_results": 1000,
+      "max_groups": 20,
+      "max_group_members": 100,
+      "replay_days": 90,
+      "max_symbols_per_scan": 5000,
+      "export_max_results": 10000
+    },
+    "default_permissions": {
+      "owner": 7,
+      "group": 5,
+      "all": 0
+    },
+    "can_manage_users": false,
+    "can_manage_groups": true,
+    "bypass_throttling": false
+  },
+  {
+    "id": "user",
+    "name": "Standard User",
+    "description": "Basic user with personal content management",
+    "capabilities": [
+      "study.create", "study.read", "study.update", "study.delete",
+      "result.create", "result.read", "result.update", "result.delete",
+      "group.read"
+    ],
+    "limits": {
+      "api_calls_per_minute": 60,
+      "api_calls_per_hour": 1000,
+      "api_calls_per_day": 10000,
+      "max_studies": 10,
+      "max_saved_results": 100,
+      "max_groups": 5,
+      "max_group_members": 50,
+      "replay_days": 7,
+      "max_symbols_per_scan": 1000,
+      "export_max_results": 1000
+    },
+    "default_permissions": {
+      "owner": 7,
+      "group": 0,
+      "all": 0
+    },
+    "can_manage_users": false,
+    "can_manage_groups": false,
+    "bypass_throttling": false
+  },
+  {
+    "id": "guest",
+    "name": "Guest",
+    "description": "Read-only access to public content",
+    "capabilities": [
+      "study.read",
+      "result.read"
+    ],
+    "limits": {
+      "api_calls_per_minute": 10,
+      "api_calls_per_hour": 100,
+      "api_calls_per_day": 500,
+      "max_studies": 0,
+      "max_saved_results": 0,
+      "max_groups": 0,
+      "max_group_members": 0,
+      "replay_days": 1,
+      "max_symbols_per_scan": 100,
+      "export_max_results": 100
+    },
+    "default_permissions": {
+      "owner": 0,
+      "group": 0,
+      "all": 4
+    },
+    "can_manage_users": false,
+    "can_manage_groups": false,
+    "bypass_throttling": false
+  }
+]

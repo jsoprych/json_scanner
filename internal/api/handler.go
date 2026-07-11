@@ -9,23 +9,33 @@ import (
 	"cetus-marketdata-scanner/internal/alert"
 	"cetus-marketdata-scanner/internal/authjwt"
 	"cetus-marketdata-scanner/internal/backtest"
+	"cetus-marketdata-scanner/internal/groups"
+	"cetus-marketdata-scanner/internal/permissions"
+	"cetus-marketdata-scanner/internal/results"
+	"cetus-marketdata-scanner/internal/roles"
 	"cetus-marketdata-scanner/internal/snapshot"
 	"cetus-marketdata-scanner/internal/store"
 	"cetus-marketdata-scanner/internal/study"
+	"cetus-marketdata-scanner/internal/throttle"
 	"cetus-marketdata-scanner/internal/user"
 )
 
 // Handler provides REST API endpoints.
 type Handler struct {
-	snap     *snapshot.DB
-	studies  *study.Store
-	store    *store.Store
-	users    *user.Store
-	subs     *study.SubscriptionStore
-	detector *alert.Detector
-	backtest *backtest.Engine
-	signer   *authjwt.Signer
-	verifier interface {
+	snap         *snapshot.DB
+	studies      *study.Store
+	store        *store.Store
+	users        *user.Store
+	subs         *study.SubscriptionStore
+	groups       *groups.Store
+	results      *results.Store
+	roles        *roles.Store
+	permChecker  *permissions.Checker
+	throttler    *throttle.Throttler
+	detector     *alert.Detector
+	backtest     *backtest.Engine
+	signer       *authjwt.Signer
+	verifier     interface {
 		Verify(string) (string, error)
 	}
 	log   *slog.Logger
@@ -38,10 +48,40 @@ func NewHandler(snap *snapshot.DB, log *slog.Logger) *Handler {
 }
 
 // NewHandlerFull creates a handler with all dependencies.
-func NewHandlerFull(snap *snapshot.DB, studies *study.Store, st *store.Store, users *user.Store, subs *study.SubscriptionStore, detector *alert.Detector, backtest *backtest.Engine, signer *authjwt.Signer, verifier interface{ Verify(string) (string, error) }, log *slog.Logger) *Handler {
+func NewHandlerFull(
+	snap *snapshot.DB,
+	studies *study.Store,
+	st *store.Store,
+	users *user.Store,
+	subs *study.SubscriptionStore,
+	groups *groups.Store,
+	results *results.Store,
+	roles *roles.Store,
+	permChecker *permissions.Checker,
+	throttler *throttle.Throttler,
+	detector *alert.Detector,
+	backtest *backtest.Engine,
+	signer *authjwt.Signer,
+	verifier interface{ Verify(string) (string, error) },
+	log *slog.Logger,
+) *Handler {
 	return &Handler{
-		snap: snap, studies: studies, store: st, users: users, subs: subs, detector: detector, backtest: backtest,
-		signer: signer, verifier: verifier, log: log, start: time.Now(),
+		snap:        snap,
+		studies:     studies,
+		store:       st,
+		users:       users,
+		subs:        subs,
+		groups:      groups,
+		results:     results,
+		roles:       roles,
+		permChecker: permChecker,
+		throttler:   throttler,
+		detector:    detector,
+		backtest:    backtest,
+		signer:      signer,
+		verifier:    verifier,
+		log:         log,
+		start:       time.Now(),
 	}
 }
 

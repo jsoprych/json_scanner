@@ -57,6 +57,7 @@ type User struct {
 	Name       string `json:"name"`
 	Tier       Tier   `json:"tier"`
 	Role       Role   `json:"role"`
+	RoleID     string `json:"role_id,omitempty"` // Reference to roles table
 	Groups     []string `json:"groups,omitempty"`      // group memberships (for group-visible studies)
 	PassHash   string   `json:"pass_hash,omitempty"`   // salted PBKDF2: pbkdf2_sha256$iter$salt$dk
 	PassSHA256 string   `json:"pass_sha256,omitempty"` // legacy unsalted sha256 (read-only compat)

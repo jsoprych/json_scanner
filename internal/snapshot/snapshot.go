@@ -51,6 +51,9 @@ func Open(path string) (*DB, error) {
 // Close releases the DB.
 func (d *DB) Close() error { return d.db.Close() }
 
+// DB returns the underlying database connection.
+func (d *DB) DB() *sql.DB { return d.db }
+
 // createTableSQL is the single source of truth for the snapshot table schema.
 // All Load/LoadHistory methods use this constant via ensureTable().
 const createTableSQL = `CREATE TABLE IF NOT EXISTS snapshot(

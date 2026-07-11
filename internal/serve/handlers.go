@@ -54,7 +54,11 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	detector := alert.NewDetector(s.snap)
 	backtestEngine := backtest.NewEngine(s.snap)
-	apiHandler := api.NewHandlerFull(s.snap, s.studies, s.warehouse, s.users, s.subs, detector, backtestEngine, s.signer, s.jwtVer, s.log)
+	apiHandler := api.NewHandlerFull(
+		s.snap, s.studies, s.warehouse, s.users, s.subs,
+		s.groups, s.results, s.roles, s.permCheck, s.throttler,
+		detector, backtestEngine, s.signer, s.jwtVer, s.log,
+	)
 	mux.Handle("/api/v1/", apiHandler.Router())
 }
 

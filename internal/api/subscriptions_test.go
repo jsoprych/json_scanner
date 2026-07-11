@@ -73,7 +73,7 @@ func setupSubscriptionTest(t *testing.T) (*Handler, *user.Store, *study.Store, *
 	verifier := authjwt.NewHMAC(secret, "sub", "test", "")
 
 	log := telemetry.New(io.Discard)
-	h := NewHandlerFull(snap, studyStore, nil, userStore, subStore, nil, nil, signer, verifier, log)
+	h := NewHandlerFull(snap, studyStore, nil, userStore, subStore, nil, nil, nil, nil, nil, nil, nil, signer, verifier, log)
 
 	// Login to get token
 	loginBody := bytes.NewBufferString(`{"user": "testuser", "password": "testpass123"}`)
