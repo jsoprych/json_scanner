@@ -45,7 +45,7 @@ func TestLoginEndpoint(t *testing.T) {
 	verifier := authjwt.NewHMAC(secret, "sub", "test-issuer", "")
 
 	log := telemetry.New(io.Discard)
-	h := NewHandlerFull(snap, nil, nil, userStore, nil, nil, nil, nil, nil, nil, nil, nil, signer, verifier, log)
+	h := NewHandlerFull(snap, nil, nil, userStore, nil, nil, nil, nil, nil, nil, nil, nil, signer, verifier, nil, log)
 
 	t.Run("successful login", func(t *testing.T) {
 		body := bytes.NewBufferString(`{"user": "testuser", "password": "testpass123"}`)
@@ -135,7 +135,7 @@ func TestMeEndpoint(t *testing.T) {
 	verifier := authjwt.NewHMAC(secret, "sub", "test-issuer", "")
 
 	log := telemetry.New(io.Discard)
-	h := NewHandlerFull(snap, nil, nil, userStore, nil, nil, nil, nil, nil, nil, nil, nil, signer, verifier, log)
+	h := NewHandlerFull(snap, nil, nil, userStore, nil, nil, nil, nil, nil, nil, nil, nil, signer, verifier, nil, log)
 
 	t.Run("authenticated request", func(t *testing.T) {
 		// First, login to get a token

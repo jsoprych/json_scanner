@@ -77,42 +77,41 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, u)
 }
 
-// requireAuth extracts the user from the JWT in the Authorization header.
+// requireAuth extracts the user from the JWT or session cookie.
 func (h *Handler) requireAuth(w http.ResponseWriter, r *http.Request) (user.User, bool) {
-	if h.verifier == nil {
-		writeError(w, http.StatusServiceUnavailable, "AUTH_DISABLED", "authentication not configured")
-		return user.User{}, false
-	}
-	auth := r.Header.Get("Authorization")
-	if auth == "" {
-		writeError(w, http.StatusUnauthorized, "MISSING_TOKEN", "Authorization header required")
-		return user.User{}, false
-	}
-	token := strings.TrimPrefix(auth, "Bearer ")
-	if token == auth {
-		writeError(w, http.StatusUnauthorized, "INVALID_TOKEN", "Bearer token required")
-		return user.User{}, false
-	}
-
-	userID, err := h.verifier.Verify(token)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "INVALID_TOKEN", err.Error())
-		return user.User{}, false
+	// Try JWT Bearer token first
+	if h.verifier != nil {
+		auth := r.Header.Get("Authorization")
+		if auth != "" {
+			token := strings.TrimPrefix(auth, "Bearer ")
+			if token != auth && token != "" {
+				userID, err := h.verifier.Verify(token)
+				if err == nil {
+					if h.users != nil {
+						u, ok := h.users.Find(userID)
+						if ok && !u.Disabled {
+							return u, true
+						}
+					}
+				}
+			}
+		}
 	}
 
-	if h.users == nil {
-		writeError(w, http.StatusServiceUnavailable, "AUTH_DISABLED", "user store not configured")
-		return user.User{}, false
-	}
-	u, ok := h.users.Find(userID)
-	if !ok {
-		writeError(w, http.StatusUnauthorized, "USER_NOT_FOUND", "user not found")
-		return user.User{}, false
-	}
-	if u.Disabled {
-		writeError(w, http.StatusForbidden, "ACCOUNT_DISABLED", "account is disabled")
-		return user.User{}, false
+	// Fall back to session cookie (for admin panel / dashboard users)
+	if h.validateSession != nil {
+		cookie, err := r.Cookie("cetus_session")
+		if err == nil {
+			userID, _, valid := h.validateSession(cookie.Value)
+			if valid {
+				u, ok := h.users.Find(userID)
+				if ok && !u.Disabled {
+					return u, true
+				}
+			}
+		}
 	}
 
-	return u, true
+	writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
+	return user.User{}, false
 }

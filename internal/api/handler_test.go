@@ -248,7 +248,7 @@ func TestStudiesEndpoints(t *testing.T) {
 	}
 
 	log := telemetry.New(io.Discard)
-	h := NewHandlerFull(snap, studyStore, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, log)
+	h := NewHandlerFull(snap, studyStore, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, log)
 
 	t.Run("create study", func(t *testing.T) {
 		body := bytes.NewBufferString(`{"key": "test-study", "title": "Test Study", "where": "rsi14 > 70", "owner": "global"}`)

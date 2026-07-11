@@ -38,6 +38,7 @@ type Handler struct {
 	verifier     interface {
 		Verify(string) (string, error)
 	}
+	validateSession func(cookie string) (userID string, isAdmin bool, valid bool)
 	log   *slog.Logger
 	start time.Time
 }
@@ -63,25 +64,27 @@ func NewHandlerFull(
 	backtest *backtest.Engine,
 	signer *authjwt.Signer,
 	verifier interface{ Verify(string) (string, error) },
+	validateSession func(cookie string) (userID string, isAdmin bool, valid bool),
 	log *slog.Logger,
 ) *Handler {
 	return &Handler{
-		snap:        snap,
-		studies:     studies,
-		store:       st,
-		users:       users,
-		subs:        subs,
-		groups:      groups,
-		results:     results,
-		roles:       roles,
-		permChecker: permChecker,
-		throttler:   throttler,
-		detector:    detector,
-		backtest:    backtest,
-		signer:      signer,
-		verifier:    verifier,
-		log:         log,
-		start:       time.Now(),
+		snap:            snap,
+		studies:         studies,
+		store:           st,
+		users:           users,
+		subs:            subs,
+		groups:          groups,
+		results:         results,
+		roles:           roles,
+		permChecker:     permChecker,
+		throttler:       throttler,
+		detector:        detector,
+		backtest:        backtest,
+		signer:          signer,
+		verifier:        verifier,
+		validateSession: validateSession,
+		log:             log,
+		start:           time.Now(),
 	}
 }
 

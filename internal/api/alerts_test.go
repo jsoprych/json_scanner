@@ -86,7 +86,7 @@ func setupAlertTest(t *testing.T) (*Handler, *user.Store, *study.Store, *snapsho
 	verifier := authjwt.NewHMAC(secret, "sub", "test", "")
 
 	log := telemetry.New(io.Discard)
-	h := NewHandlerFull(snap, studyStore, nil, userStore, nil, nil, nil, nil, nil, nil, detector, nil, signer, verifier, log)
+	h := NewHandlerFull(snap, studyStore, nil, userStore, nil, nil, nil, nil, nil, nil, detector, nil, signer, verifier, nil, log)
 
 	// Login to get token
 	loginBody := bytes.NewBufferString(`{"user": "testuser", "password": "testpass123"}`)

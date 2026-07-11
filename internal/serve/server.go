@@ -66,6 +66,9 @@ type Server struct {
 	throttler *throttle.Throttler
 	permCheck *permissions.Checker
 	admin     *admin.Handler
+	
+	// Session validator shared between admin panel and API
+	sessionValidator func(cookie string) (userID string, isAdmin bool, valid bool)
 
 	jwtVer interface {
 		Verify(string) (string, error)
@@ -218,6 +221,7 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 		warehouse: st, snap: snap, users: users, studies: studyStore, subs: subStore,
 		groups: groupsStore, results: resultsStore, permCheck: permChecker,
 		roles: rolesStore, throttler: throttler, admin: adminHandler,
+		sessionValidator: validateSession,
 		jwtVer: jwtVer, signer: apiSigner,
 		sessions:     sessions,
 		sessTTL:      time.Duration(cfg.SessionHours) * time.Hour,
