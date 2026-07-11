@@ -1,0 +1,314 @@
+<div x-data="usersManager()" x-init="init()">
+  <!-- Actions Bar -->
+  <div class="flex justify-between items-center mb-3">
+    <div class="flex gap-2">
+      <input 
+        type="text" 
+        class="form-input" 
+        placeholder="Search users..." 
+        x-model="searchQuery"
+        @input="filterUsers()"
+        style="width: 300px;"
+      >
+      <select class="form-select" x-model="roleFilter" @change="filterUsers()" style="width: 200px;">
+        <option value="">All Roles</option>
+        <template x-for="role in roles" :key="role.id">
+          <option :value="role.id" x-text="role.name"></option>
+        </template>
+      </select>
+    </div>
+    <button class="btn btn-primary" @click="showCreateModal()">
+      ➕ Create User
+    </button>
+  </div>
+
+  <!-- Users Table -->
+  <div class="card">
+    <div class="card-body">
+      <div class="table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Name</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th>API Calls</th>
+              <th>Created</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="user in filteredUsers" :key="user.id">
+              <tr>
+                <td x-text="user.id"></td>
+                <td x-text="user.name"></td>
+                <td>
+                  <span class="badge badge-primary" x-text="user.role"></span>
+                </td>
+                <td>
+                  <span 
+                    class="badge" 
+                    :class="user.disabled ? 'badge-danger' : 'badge-success'"
+                    x-text="user.disabled ? 'Disabled' : 'Active'"
+                  ></span>
+                </td>
+                <td x-text="user.apiCalls"></td>
+                <td x-text="user.createdAt"></td>
+                <td>
+                  <div class="flex gap-1">
+                    <button class="btn btn-secondary btn-sm" @click="showEditModal(user)">
+                      ✏️
+                    </button>
+                    <button class="btn btn-secondary btn-sm" @click="showLimitsModal(user)">
+                      📊
+                    </button>
+                    <button class="btn btn-danger btn-sm" @click="confirmDelete(user)">
+                      🗑️
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create/Edit User Modal -->
+  <div x-show="showModal" class="modal-overlay" :class="{ 'active': showModal }" @click.self="closeModal()">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title" x-text="editingUser ? 'Edit User' : 'Create User'"></h3>
+        <button class="modal-close" @click="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form @submit.prevent="saveUser()">
+          <div class="form-group">
+            <label class="form-label">User ID</label>
+            <input 
+              type="text" 
+              class="form-input" 
+              x-model="formData.id"
+              :disabled="editingUser"
+              required
+            >
+          </div>
+          <div class="form-group">
+            <label class="form-label">Name</label>
+            <input 
+              type="text" 
+              class="form-input" 
+              x-model="formData.name"
+              required
+            >
+          </div>
+          <div class="form-group">
+            <label class="form-label">Password</label>
+            <input 
+              type="password" 
+              class="form-input" 
+              x-model="formData.password"
+              :required="!editingUser"
+              placeholder="Leave blank to keep current"
+            >
+          </div>
+          <div class="form-group">
+            <label class="form-label">Role</label>
+            <select class="form-select" x-model="formData.roleId" required>
+              <template x-for="role in roles" :key="role.id">
+                <option :value="role.id" x-text="role.name"></option>
+              </template>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="flex items-center gap-2">
+              <input type="checkbox" x-model="formData.disabled">
+              <span>Disabled</span>
+            </label>
+          </div>
+          <div class="flex justify-end gap-2">
+            <button type="button" class="btn btn-secondary" @click="closeModal()">
+              Cancel
+            </button>
+            <button type="submit" class="btn btn-primary">
+              Save
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- User Limits Modal -->
+  <div x-show="showLimitsModal" class="modal-overlay" :class="{ 'active': showLimitsModal }" @click.self="closeLimitsModal()">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title">User Limits & Usage</h3>
+        <button class="modal-close" @click="closeLimitsModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div x-show="userLimits">
+          <h4 class="mb-2">Current Usage</h4>
+          <template x-for="(value, key) in userLimits?.usage" :key="key">
+            <div class="mb-2">
+              <div class="flex justify-between mb-1">
+                <span x-text="key"></span>
+                <span class="text-muted" x-text="value"></span>
+              </div>
+            </div>
+          </template>
+          
+          <h4 class="mt-3 mb-2">Limits</h4>
+          <template x-for="(value, key) in userLimits?.limits" :key="key">
+            <div class="mb-2">
+              <div class="flex justify-between mb-1">
+                <span x-text="key"></span>
+                <span class="text-muted" x-text="value"></span>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function usersManager() {
+  return {
+    users: [],
+    filteredUsers: [],
+    roles: [],
+    searchQuery: '',
+    roleFilter: '',
+    showModal: false,
+    showLimitsModal: false,
+    editingUser: null,
+    userLimits: null,
+    formData: {
+      id: '',
+      name: '',
+      password: '',
+      roleId: '',
+      disabled: false
+    },
+    
+    async init() {
+      await Promise.all([
+        this.loadUsers(),
+        this.loadRoles()
+      ]);
+    },
+    
+    async loadUsers() {
+      try {
+        const data = await API.get('/users');
+        this.users = data.users || [];
+        this.filteredUsers = [...this.users];
+      } catch (error) {
+        Toast.error('Failed to load users');
+      }
+    },
+    
+    async loadRoles() {
+      try {
+        const data = await API.get('/roles');
+        this.roles = data.roles || [];
+      } catch (error) {
+        Toast.error('Failed to load roles');
+      }
+    },
+    
+    filterUsers() {
+      this.filteredUsers = this.users.filter(user => {
+        const matchesSearch = !this.searchQuery || 
+          user.id.toLowerCase().includes(this.searchQuery.toLowerCase()) ||
+          user.name.toLowerCase().includes(this.searchQuery.toLowerCase());
+        const matchesRole = !this.roleFilter || user.roleId === this.roleFilter;
+        return matchesSearch && matchesRole;
+      });
+    },
+    
+    showCreateModal() {
+      this.editingUser = null;
+      this.formData = {
+        id: '',
+        name: '',
+        password: '',
+        roleId: this.roles[0]?.id || '',
+        disabled: false
+      };
+      this.showModal = true;
+    },
+    
+    showEditModal(user) {
+      this.editingUser = user;
+      this.formData = {
+        id: user.id,
+        name: user.name,
+        password: '',
+        roleId: user.roleId,
+        disabled: user.disabled
+      };
+      this.showModal = true;
+    },
+    
+    async showLimitsModal(user) {
+      try {
+        const [limits, usage] = await Promise.all([
+          API.get(`/users/${user.id}/limits`),
+          API.get(`/users/${user.id}/usage`)
+        ]);
+        this.userLimits = { limits, usage };
+        this.showLimitsModal = true;
+      } catch (error) {
+        Toast.error('Failed to load user limits');
+      }
+    },
+    
+    closeModal() {
+      this.showModal = false;
+      this.editingUser = null;
+    },
+    
+    closeLimitsModal() {
+      this.showLimitsModal = false;
+      this.userLimits = null;
+    },
+    
+    async saveUser() {
+      try {
+        if (this.editingUser) {
+          await API.put(`/users/${this.formData.id}`, this.formData);
+          Toast.success('User updated');
+        } else {
+          await API.post('/users', this.formData);
+          Toast.success('User created');
+        }
+        this.closeModal();
+        await this.loadUsers();
+      } catch (error) {
+        Toast.error(error.message);
+      }
+    },
+    
+    confirmDelete(user) {
+      Modal.confirm(
+        'Delete User',
+        `Are you sure you want to delete user "${user.name}"? This action cannot be undone.`,
+        async () => {
+          try {
+            await API.delete(`/users/${user.id}`);
+            Toast.success('User deleted');
+            await this.loadUsers();
+          } catch (error) {
+            Toast.error(error.message);
+          }
+        }
+      );
+    }
+  };
+}
+</script>

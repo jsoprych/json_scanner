@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"cetus-marketdata-scanner/internal/admin"
 	"cetus-marketdata-scanner/internal/alert"
 	"cetus-marketdata-scanner/internal/api"
 	"cetus-marketdata-scanner/internal/authjwt"
@@ -63,6 +64,7 @@ type Server struct {
 	roles     *roles.Store
 	throttler *throttle.Throttler
 	permCheck *permissions.Checker
+	admin     *admin.Handler
 
 	jwtVer interface {
 		Verify(string) (string, error)
@@ -184,11 +186,17 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 		return nil, fmt.Errorf("init throttler: %w", err)
 	}
 
+	// Initialize admin panel
+	adminHandler, err := admin.NewHandler(snap.DB(), users, rolesStore, throttler, log)
+	if err != nil {
+		return nil, fmt.Errorf("init admin: %w", err)
+	}
+
 	return &Server{
 		cfg: cfg, log: log, ctx: ctx,
 		warehouse: st, snap: snap, users: users, studies: studyStore, subs: subStore,
 		groups: groupsStore, results: resultsStore, permCheck: permChecker,
-		roles: rolesStore, throttler: throttler,
+		roles: rolesStore, throttler: throttler, admin: adminHandler,
 		jwtVer: jwtVer, signer: apiSigner,
 		sessions:     newSessionStore(),
 		sessTTL:      time.Duration(cfg.SessionHours) * time.Hour,

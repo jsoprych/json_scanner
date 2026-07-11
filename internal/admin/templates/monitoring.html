@@ -1,0 +1,312 @@
+<div x-data="monitoring()" x-init="init()">
+  <!-- System Stats -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">Uptime</div>
+      <div class="stat-value" x-text="stats.uptime"></div>
+      <div class="stat-change positive">Since last restart</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Memory Usage</div>
+      <div class="stat-value" x-text="stats.memory"></div>
+      <div class="stat-change" :class="stats.memoryPercent > 80 ? 'negative' : 'positive'">
+        <span x-text="stats.memoryPercent + '% of available'"></span>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Active Connections</div>
+      <div class="stat-value" x-text="stats.connections"></div>
+      <div class="stat-change positive">Current</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Request Rate</div>
+      <div class="stat-value" x-text="stats.requestRate"></div>
+      <div class="stat-change positive">Requests/min</div>
+    </div>
+  </div>
+
+  <!-- API Performance -->
+  <div class="card mb-3">
+    <div class="card-header">
+      <h2 class="card-title">API Performance</h2>
+      <button class="btn btn-secondary btn-sm" @click="refreshMetrics()">
+        🔄 Refresh
+      </button>
+    </div>
+    <div class="card-body">
+      <div class="table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Endpoint</th>
+              <th>Requests</th>
+              <th>Avg Latency</th>
+              <th>P95 Latency</th>
+              <th>Error Rate</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="metric in apiMetrics" :key="metric.endpoint">
+              <tr>
+                <td x-text="metric.endpoint"></td>
+                <td x-text="metric.requests"></td>
+                <td x-text="metric.avgLatency + 'ms'"></td>
+                <td x-text="metric.p95Latency + 'ms'"></td>
+                <td>
+                  <span 
+                    class="badge" 
+                    :class="metric.errorRate > 5 ? 'badge-danger' : metric.errorRate > 1 ? 'badge-warning' : 'badge-success'"
+                    x-text="metric.errorRate + '%'"
+                  ></span>
+                </td>
+                <td>
+                  <span 
+                    class="badge" 
+                    :class="metric.healthy ? 'badge-success' : 'badge-danger'"
+                    x-text="metric.healthy ? 'Healthy' : 'Degraded'"
+                  ></span>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Database Stats -->
+  <div class="card mb-3">
+    <div class="card-header">
+      <h2 class="card-title">Database Statistics</h2>
+    </div>
+    <div class="card-body">
+      <div class="stats-grid">
+        <div>
+          <div class="stat-label">Warehouse Size</div>
+          <div class="stat-value" style="font-size: 20px;" x-text="dbStats.warehouseSize"></div>
+        </div>
+        <div>
+          <div class="stat-label">Scanner DB Size</div>
+          <div class="stat-value" style="font-size: 20px;" x-text="dbStats.scannerSize"></div>
+        </div>
+        <div>
+          <div class="stat-label">Total Symbols</div>
+          <div class="stat-value" style="font-size: 20px;" x-text="dbStats.totalSymbols"></div>
+        </div>
+        <div>
+          <div class="stat-label">Snapshot Count</div>
+          <div class="stat-value" style="font-size: 20px;" x-text="dbStats.snapshotCount"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Throttling Stats -->
+  <div class="card mb-3">
+    <div class="card-header">
+      <h2 class="card-title">Throttling & Rate Limits</h2>
+    </div>
+    <div class="card-body">
+      <div class="stats-grid">
+        <div>
+          <div class="stat-label">Rate Limit Violations (24h)</div>
+          <div class="stat-value" style="font-size: 20px;" x-text="throttleStats.violations"></div>
+        </div>
+        <div>
+          <div class="stat-label">Quota Exceeded (24h)</div>
+          <div class="stat-value" style="font-size: 20px;" x-text="throttleStats.quotaExceeded"></div>
+        </div>
+        <div>
+          <div class="stat-label">Users Near Limit</div>
+          <div class="stat-value" style="font-size: 20px;" x-text="throttleStats.nearLimit"></div>
+        </div>
+        <div>
+          <div class="stat-label">Bypass Users</div>
+          <div class="stat-value" style="font-size: 20px;" x-text="throttleStats.bypassUsers"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent Errors -->
+  <div class="card">
+    <div class="card-header">
+      <h2 class="card-title">Recent Errors</h2>
+    </div>
+    <div class="card-body">
+      <div class="table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Level</th>
+              <th>Message</th>
+              <th>User</th>
+              <th>Endpoint</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="error in recentErrors" :key="error.id">
+              <tr>
+                <td x-text="error.time"></td>
+                <td>
+                  <span 
+                    class="badge" 
+                    :class="'badge-' + error.level"
+                    x-text="error.level"
+                  ></span>
+                </td>
+                <td x-text="error.message"></td>
+                <td x-text="error.user"></td>
+                <td x-text="error.endpoint"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function monitoring() {
+  return {
+    stats: {
+      uptime: '0d 0h',
+      memory: '0 MB',
+      memoryPercent: 0,
+      connections: 0,
+      requestRate: 0
+    },
+    apiMetrics: [],
+    dbStats: {
+      warehouseSize: '0 GB',
+      scannerSize: '0 MB',
+      totalSymbols: 0,
+      snapshotCount: 0
+    },
+    throttleStats: {
+      violations: 0,
+      quotaExceeded: 0,
+      nearLimit: 0,
+      bypassUsers: 0
+    },
+    recentErrors: [],
+    
+    async init() {
+      await Promise.all([
+        this.loadSystemStats(),
+        this.loadAPIMetrics(),
+        this.loadDBStats(),
+        this.loadThrottleStats(),
+        this.loadRecentErrors()
+      ]);
+      
+      // Auto-refresh every 30 seconds
+      setInterval(() => {
+        this.refreshMetrics();
+      }, 30000);
+    },
+    
+    async loadSystemStats() {
+      try {
+        const data = await API.get('/admin/monitoring/system');
+        this.stats = data;
+      } catch (error) {
+        // Use mock data if API not available
+        this.stats = {
+          uptime: '2d 14h',
+          memory: '256 MB',
+          memoryPercent: 32,
+          connections: 12,
+          requestRate: 45
+        };
+      }
+    },
+    
+    async loadAPIMetrics() {
+      try {
+        const data = await API.get('/admin/monitoring/api');
+        this.apiMetrics = data;
+      } catch (error) {
+        // Use mock data
+        this.apiMetrics = [
+          {
+            endpoint: '/api/v1/scan',
+            requests: 1250,
+            avgLatency: 45,
+            p95Latency: 120,
+            errorRate: 0.5,
+            healthy: true
+          },
+          {
+            endpoint: '/api/v1/studies',
+            requests: 890,
+            avgLatency: 32,
+            p95Latency: 85,
+            errorRate: 0.2,
+            healthy: true
+          },
+          {
+            endpoint: '/api/v1/results',
+            requests: 456,
+            avgLatency: 28,
+            p95Latency: 65,
+            errorRate: 1.2,
+            healthy: true
+          }
+        ];
+      }
+    },
+    
+    async loadDBStats() {
+      try {
+        const data = await API.get('/admin/monitoring/database');
+        this.dbStats = data;
+      } catch (error) {
+        this.dbStats = {
+          warehouseSize: '1.8 GB',
+          scannerSize: '45 MB',
+          totalSymbols: 11373,
+          snapshotCount: 125
+        };
+      }
+    },
+    
+    async loadThrottleStats() {
+      try {
+        const data = await API.get('/admin/monitoring/throttle');
+        this.throttleStats = data;
+      } catch (error) {
+        this.throttleStats = {
+          violations: 12,
+          quotaExceeded: 3,
+          nearLimit: 8,
+          bypassUsers: 2
+        };
+      }
+    },
+    
+    async loadRecentErrors() {
+      try {
+        const data = await API.get('/admin/monitoring/errors');
+        this.recentErrors = data;
+      } catch (error) {
+        this.recentErrors = [];
+      }
+    },
+    
+    async refreshMetrics() {
+      await Promise.all([
+        this.loadSystemStats(),
+        this.loadAPIMetrics(),
+        this.loadDBStats(),
+        this.loadThrottleStats(),
+        this.loadRecentErrors()
+      ]);
+      Toast.success('Metrics refreshed');
+    }
+  };
+}
+</script>

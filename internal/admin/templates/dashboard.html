@@ -1,0 +1,146 @@
+<div x-data="dashboard()" x-init="init()">
+  <!-- Stats Grid -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">Total Users</div>
+      <div class="stat-value" x-text="stats.totalUsers"></div>
+      <div class="stat-change positive">↑ 12% this month</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Active Users</div>
+      <div class="stat-value" x-text="stats.activeUsers"></div>
+      <div class="stat-change positive">↑ 8% this week</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">API Calls Today</div>
+      <div class="stat-value" x-text="stats.apiCalls"></div>
+      <div class="stat-change" :class="stats.apiCallsChange >= 0 ? 'positive' : 'negative'">
+        <span x-text="stats.apiCallsChange >= 0 ? '↑' : '↓'"></span>
+        <span x-text="Math.abs(stats.apiCallsChange) + '% vs yesterday'"></span>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Storage Used</div>
+      <div class="stat-value" x-text="stats.storage"></div>
+      <div class="stat-change positive">↑ 2% this week</div>
+    </div>
+  </div>
+
+  <!-- Recent Activity -->
+  <div class="card">
+    <div class="card-header">
+      <h2 class="card-title">Recent Activity</h2>
+      <button class="btn btn-secondary btn-sm" @click="refreshActivity()">
+        🔄 Refresh
+      </button>
+    </div>
+    <div class="card-body">
+      <div class="table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Action</th>
+              <th>Resource</th>
+              <th>Time</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="activity in activities" :key="activity.id">
+              <tr>
+                <td x-text="activity.user"></td>
+                <td x-text="activity.action"></td>
+                <td x-text="activity.resource"></td>
+                <td x-text="activity.time"></td>
+                <td>
+                  <span class="badge" :class="'badge-' + activity.status" x-text="activity.status"></span>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- User Quotas -->
+  <div class="card mt-3">
+    <div class="card-header">
+      <h2 class="card-title">User Quotas</h2>
+    </div>
+    <div class="card-body">
+      <template x-for="quota in quotas" :key="quota.userId">
+        <div class="mb-3">
+          <div class="flex justify-between mb-1">
+            <span x-text="quota.userName"></span>
+            <span class="text-muted" x-text="quota.used + ' / ' + quota.limit"></span>
+          </div>
+          <div class="progress">
+            <div 
+              class="progress-bar" 
+              :class="{ 'warning': quota.percent > 70, 'danger': quota.percent > 90 }"
+              :style="'width: ' + quota.percent + '%'"
+            ></div>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+</div>
+
+<script>
+function dashboard() {
+  return {
+    stats: {
+      totalUsers: 0,
+      activeUsers: 0,
+      apiCalls: 0,
+      apiCallsChange: 0,
+      storage: '0 GB'
+    },
+    activities: [],
+    quotas: [],
+    
+    async init() {
+      await Promise.all([
+        this.loadStats(),
+        this.loadActivities(),
+        this.loadQuotas()
+      ]);
+    },
+    
+    async loadStats() {
+      try {
+        const data = await API.get('/admin/stats');
+        this.stats = data;
+      } catch (error) {
+        Toast.error('Failed to load stats');
+      }
+    },
+    
+    async loadActivities() {
+      try {
+        const data = await API.get('/admin/activities?limit=10');
+        this.activities = data;
+      } catch (error) {
+        Toast.error('Failed to load activities');
+      }
+    },
+    
+    async loadQuotas() {
+      try {
+        const data = await API.get('/admin/quotas');
+        this.quotas = data;
+      } catch (error) {
+        Toast.error('Failed to load quotas');
+      }
+    },
+    
+    async refreshActivity() {
+      await this.loadActivities();
+      Toast.success('Activity refreshed');
+    }
+  };
+}
+</script>

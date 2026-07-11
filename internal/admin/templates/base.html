@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Panel - Cetus Scanner</title>
+  <link rel="stylesheet" href="/admin/static/styles.css">
+  <!-- Alpine.js - 15kb, no build step -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body x-data="{ sidebarOpen: false }">
+  <div class="app-container">
+    <!-- Sidebar -->
+    <aside class="sidebar" :class="{ 'open': sidebarOpen }">
+      <div class="sidebar-header">
+        <div class="sidebar-logo">Cetus Admin</div>
+      </div>
+      <nav class="sidebar-nav">
+        <a href="/admin/dashboard" class="nav-item" :class="{ 'active': currentPage === 'dashboard' }">
+          <span class="nav-icon">📊</span>
+          <span>Dashboard</span>
+        </a>
+        <a href="/admin/users" class="nav-item" :class="{ 'active': currentPage === 'users' }">
+          <span class="nav-icon">👥</span>
+          <span>Users</span>
+        </a>
+        <a href="/admin/roles" class="nav-item" :class="{ 'active': currentPage === 'roles' }">
+          <span class="nav-icon">🔐</span>
+          <span>Roles</span>
+        </a>
+        <a href="/admin/groups" class="nav-item" :class="{ 'active': currentPage === 'groups' }">
+          <span class="nav-icon">🏢</span>
+          <span>Groups</span>
+        </a>
+        <a href="/admin/monitoring" class="nav-item" :class="{ 'active': currentPage === 'monitoring' }">
+          <span class="nav-icon">📈</span>
+          <span>Monitoring</span>
+        </a>
+      </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <!-- Header -->
+      <header class="header">
+        <h1 class="header-title" x-text="pageTitle"></h1>
+        <div class="header-actions">
+          <button id="theme-toggle" class="btn btn-secondary btn-sm">
+            <span class="icon">🌙</span>
+          </button>
+          <button class="btn btn-secondary btn-sm" @click="sidebarOpen = !sidebarOpen">
+            ☰
+          </button>
+        </div>
+      </header>
+
+      <!-- Content Area -->
+      <main class="content">
+        {{.Content}}
+      </main>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="/admin/static/js/api.js"></script>
+  <script src="/admin/static/js/toast.js"></script>
+  <script src="/admin/static/js/modal.js"></script>
+  <script src="/admin/static/js/theme.js"></script>
+  <script>
+    // Initialize theme
+    Theme.init();
+  </script>
+</body>
+</html>

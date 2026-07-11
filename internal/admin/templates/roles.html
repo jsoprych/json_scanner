@@ -1,0 +1,312 @@
+<div x-data="rolesManager()" x-init="init()">
+  <!-- Actions Bar -->
+  <div class="flex justify-between items-center mb-3">
+    <div class="text-muted">
+      <span x-text="roles.length"></span> roles defined
+    </div>
+    <button class="btn btn-primary" @click="showCreateModal()">
+      ➕ Create Role
+    </button>
+  </div>
+
+  <!-- Roles Grid -->
+  <div class="stats-grid">
+    <template x-for="role in roles" :key="role.id">
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title" x-text="role.name"></h3>
+          <div class="flex gap-1">
+            <button class="btn btn-secondary btn-sm" @click="showEditModal(role)">
+              ✏️
+            </button>
+            <button 
+              class="btn btn-danger btn-sm" 
+              @click="confirmDelete(role)"
+              x-show="!['admin', 'user', 'guest'].includes(role.id)"
+            >
+              🗑️
+            </button>
+          </div>
+        </div>
+        <div class="card-body">
+          <p class="text-muted mb-2" x-text="role.description"></p>
+          
+          <div class="mb-2">
+            <strong>Capabilities:</strong>
+            <div class="mt-1">
+              <template x-for="cap in role.capabilities.slice(0, 5)" :key="cap">
+                <span class="badge badge-primary mr-1 mb-1" x-text="cap"></span>
+              </template>
+              <span 
+                x-show="role.capabilities.length > 5" 
+                class="badge badge-secondary"
+                x-text="'+' + (role.capabilities.length - 5) + ' more'"
+              ></span>
+            </div>
+          </div>
+          
+          <div class="mb-2">
+            <strong>Limits:</strong>
+            <div class="mt-1 text-muted" style="font-size: 12px;">
+              <div>API: <span x-text="role.limits.apiCallsPerDay"></span>/day</div>
+              <div>Studies: <span x-text="role.limits.maxStudies"></span></div>
+              <div>Results: <span x-text="role.limits.maxSavedResults"></span></div>
+            </div>
+          </div>
+          
+          <div class="flex gap-2 mt-2">
+            <span class="badge" :class="role.canManageUsers ? 'badge-success' : 'badge-secondary'">
+              <span x-text="role.canManageUsers ? '✓' : '✗'"></span> Manage Users
+            </span>
+            <span class="badge" :class="role.canManageGroups ? 'badge-success' : 'badge-secondary'">
+              <span x-text="role.canManageGroups ? '✓' : '✗'"></span> Manage Groups
+            </span>
+          </div>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Create/Edit Role Modal -->
+  <div x-show="showModal" class="modal-overlay" :class="{ 'active': showModal }" @click.self="closeModal()">
+    <div class="modal" style="max-width: 800px;">
+      <div class="modal-header">
+        <h3 class="modal-title" x-text="editingRole ? 'Edit Role' : 'Create Role'"></h3>
+        <button class="modal-close" @click="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form @submit.prevent="saveRole()">
+          <div class="form-group">
+            <label class="form-label">Role ID</label>
+            <input 
+              type="text" 
+              class="form-input" 
+              x-model="formData.id"
+              :disabled="editingRole"
+              required
+            >
+          </div>
+          <div class="form-group">
+            <label class="form-label">Name</label>
+            <input 
+              type="text" 
+              class="form-input" 
+              x-model="formData.name"
+              required
+            >
+          </div>
+          <div class="form-group">
+            <label class="form-label">Description</label>
+            <textarea 
+              class="form-textarea" 
+              x-model="formData.description"
+              rows="2"
+            ></textarea>
+          </div>
+          
+          <div class="form-group">
+            <label class="form-label">Capabilities</label>
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+              <template x-for="cap in allCapabilities" :key="cap">
+                <label class="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    :value="cap"
+                    x-model="formData.capabilities"
+                  >
+                  <span x-text="cap" style="font-size: 12px;"></span>
+                </label>
+              </template>
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label class="form-label">API Rate Limits</label>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+              <div>
+                <label class="form-label" style="font-size: 11px;">Per Minute</label>
+                <input type="number" class="form-input" x-model.number="formData.limits.apiCallsPerMinute">
+              </div>
+              <div>
+                <label class="form-label" style="font-size: 11px;">Per Hour</label>
+                <input type="number" class="form-input" x-model.number="formData.limits.apiCallsPerHour">
+              </div>
+              <div>
+                <label class="form-label" style="font-size: 11px;">Per Day</label>
+                <input type="number" class="form-input" x-model.number="formData.limits.apiCallsPerDay">
+              </div>
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label class="form-label">Resource Quotas</label>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+              <div>
+                <label class="form-label" style="font-size: 11px;">Max Studies</label>
+                <input type="number" class="form-input" x-model.number="formData.limits.maxStudies">
+              </div>
+              <div>
+                <label class="form-label" style="font-size: 11px;">Max Results</label>
+                <input type="number" class="form-input" x-model.number="formData.limits.maxSavedResults">
+              </div>
+              <div>
+                <label class="form-label" style="font-size: 11px;">Max Groups</label>
+                <input type="number" class="form-input" x-model.number="formData.limits.maxGroups">
+              </div>
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label class="flex items-center gap-2">
+              <input type="checkbox" x-model="formData.canManageUsers">
+              <span>Can Manage Users</span>
+            </label>
+          </div>
+          
+          <div class="form-group">
+            <label class="flex items-center gap-2">
+              <input type="checkbox" x-model="formData.canManageGroups">
+              <span>Can Manage Groups</span>
+            </label>
+          </div>
+          
+          <div class="form-group">
+            <label class="flex items-center gap-2">
+              <input type="checkbox" x-model="formData.bypassThrottling">
+              <span>Bypass Throttling (Admin Only)</span>
+            </label>
+          </div>
+          
+          <div class="flex justify-end gap-2">
+            <button type="button" class="btn btn-secondary" @click="closeModal()">
+              Cancel
+            </button>
+            <button type="submit" class="btn btn-primary">
+              Save
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function rolesManager() {
+  return {
+    roles: [],
+    showModal: false,
+    editingRole: null,
+    allCapabilities: [
+      'user.create', 'user.read', 'user.update', 'user.delete',
+      'group.create', 'group.read', 'group.update', 'group.delete',
+      'study.create', 'study.read', 'study.update', 'study.delete',
+      'result.create', 'result.read', 'result.update', 'result.delete',
+      'system.admin'
+    ],
+    formData: {
+      id: '',
+      name: '',
+      description: '',
+      capabilities: [],
+      limits: {
+        apiCallsPerMinute: 60,
+        apiCallsPerHour: 1000,
+        apiCallsPerDay: 10000,
+        maxStudies: 10,
+        maxSavedResults: 100,
+        maxGroups: 5,
+        maxGroupMembers: 50,
+        replayDays: 7,
+        maxSymbolsPerScan: 1000,
+        exportMaxResults: 1000
+      },
+      canManageUsers: false,
+      canManageGroups: false,
+      bypassThrottling: false
+    },
+    
+    async init() {
+      await this.loadRoles();
+    },
+    
+    async loadRoles() {
+      try {
+        const data = await API.get('/roles');
+        this.roles = data.roles || [];
+      } catch (error) {
+        Toast.error('Failed to load roles');
+      }
+    },
+    
+    showCreateModal() {
+      this.editingRole = null;
+      this.formData = {
+        id: '',
+        name: '',
+        description: '',
+        capabilities: [],
+        limits: {
+          apiCallsPerMinute: 60,
+          apiCallsPerHour: 1000,
+          apiCallsPerDay: 10000,
+          maxStudies: 10,
+          maxSavedResults: 100,
+          maxGroups: 5,
+          maxGroupMembers: 50,
+          replayDays: 7,
+          maxSymbolsPerScan: 1000,
+          exportMaxResults: 1000
+        },
+        canManageUsers: false,
+        canManageGroups: false,
+        bypassThrottling: false
+      };
+      this.showModal = true;
+    },
+    
+    showEditModal(role) {
+      this.editingRole = role;
+      this.formData = { ...role };
+      this.showModal = true;
+    },
+    
+    closeModal() {
+      this.showModal = false;
+      this.editingRole = null;
+    },
+    
+    async saveRole() {
+      try {
+        if (this.editingRole) {
+          await API.put(`/roles/${this.formData.id}`, this.formData);
+          Toast.success('Role updated');
+        } else {
+          await API.post('/roles', this.formData);
+          Toast.success('Role created');
+        }
+        this.closeModal();
+        await this.loadRoles();
+      } catch (error) {
+        Toast.error(error.message);
+      }
+    },
+    
+    confirmDelete(role) {
+      Modal.confirm(
+        'Delete Role',
+        `Are you sure you want to delete role "${role.name}"? This action cannot be undone.`,
+        async () => {
+          try {
+            await API.delete(`/roles/${role.id}`);
+            Toast.success('Role deleted');
+            await this.loadRoles();
+          } catch (error) {
+            Toast.error(error.message);
+          }
+        }
+      );
+    }
+  };
+}
+</script>

@@ -60,6 +60,11 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		detector, backtestEngine, s.signer, s.jwtVer, s.log,
 	)
 	mux.Handle("/api/v1/", apiHandler.Router())
+
+	// Register admin panel routes
+	if s.admin != nil {
+		s.admin.RegisterRoutes(mux)
+	}
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {

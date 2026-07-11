@@ -1,0 +1,300 @@
+<div x-data="groupsManager()" x-init="init()">
+  <!-- Actions Bar -->
+  <div class="flex justify-between items-center mb-3">
+    <div class="text-muted">
+      <span x-text="groups.length"></span> groups defined
+    </div>
+    <button class="btn btn-primary" @click="showCreateModal()">
+      ➕ Create Group
+    </button>
+  </div>
+
+  <!-- Groups Table -->
+  <div class="card">
+    <div class="card-body">
+      <div class="table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Name</th>
+              <th>Description</th>
+              <th>Members</th>
+              <th>Owner</th>
+              <th>Created</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="group in groups" :key="group.id">
+              <tr>
+                <td x-text="group.id"></td>
+                <td x-text="group.name"></td>
+                <td x-text="group.description"></td>
+                <td>
+                  <span class="badge badge-primary" x-text="group.memberCount"></span>
+                </td>
+                <td x-text="group.ownerId"></td>
+                <td x-text="group.createdAt"></td>
+                <td>
+                  <div class="flex gap-1">
+                    <button class="btn btn-secondary btn-sm" @click="showMembersModal(group)">
+                      👥
+                    </button>
+                    <button class="btn btn-secondary btn-sm" @click="showEditModal(group)">
+                      ✏️
+                    </button>
+                    <button class="btn btn-danger btn-sm" @click="confirmDelete(group)">
+                      🗑️
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create/Edit Group Modal -->
+  <div x-show="showModal" class="modal-overlay" :class="{ 'active': showModal }" @click.self="closeModal()">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title" x-text="editingGroup ? 'Edit Group' : 'Create Group'"></h3>
+        <button class="modal-close" @click="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form @submit.prevent="saveGroup()">
+          <div class="form-group">
+            <label class="form-label">Group ID</label>
+            <input 
+              type="text" 
+              class="form-input" 
+              x-model="formData.id"
+              :disabled="editingGroup"
+              required
+            >
+          </div>
+          <div class="form-group">
+            <label class="form-label">Name</label>
+            <input 
+              type="text" 
+              class="form-input" 
+              x-model="formData.name"
+              required
+            >
+          </div>
+          <div class="form-group">
+            <label class="form-label">Description</label>
+            <textarea 
+              class="form-textarea" 
+              x-model="formData.description"
+              rows="3"
+            ></textarea>
+          </div>
+          <div class="flex justify-end gap-2">
+            <button type="button" class="btn btn-secondary" @click="closeModal()">
+              Cancel
+            </button>
+            <button type="submit" class="btn btn-primary">
+              Save
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Members Modal -->
+  <div x-show="showMembersModal" class="modal-overlay" :class="{ 'active': showMembersModal }" @click.self="closeMembersModal()">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title">Group Members</h3>
+        <button class="modal-close" @click="closeMembersModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <div class="flex gap-2">
+            <input 
+              type="text" 
+              class="form-input" 
+              placeholder="User ID"
+              x-model="newMemberId"
+            >
+            <button class="btn btn-primary" @click="addMember()">
+              Add
+            </button>
+          </div>
+        </div>
+        <div class="table-container">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>User ID</th>
+                <th>Role</th>
+                <th>Joined</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="member in members" :key="member.userId">
+                <tr>
+                  <td x-text="member.userId"></td>
+                  <td>
+                    <span class="badge" :class="member.role === 'leader' ? 'badge-primary' : 'badge-secondary'" x-text="member.role"></span>
+                  </td>
+                  <td x-text="member.joinedAt"></td>
+                  <td>
+                    <button class="btn btn-danger btn-sm" @click="removeMember(member.userId)">
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function groupsManager() {
+  return {
+    groups: [],
+    showModal: false,
+    showMembersModal: false,
+    editingGroup: null,
+    currentGroup: null,
+    members: [],
+    newMemberId: '',
+    formData: {
+      id: '',
+      name: '',
+      description: ''
+    },
+    
+    async init() {
+      await this.loadGroups();
+    },
+    
+    async loadGroups() {
+      try {
+        const data = await API.get('/groups');
+        this.groups = data.groups || [];
+      } catch (error) {
+        Toast.error('Failed to load groups');
+      }
+    },
+    
+    showCreateModal() {
+      this.editingGroup = null;
+      this.formData = {
+        id: '',
+        name: '',
+        description: ''
+      };
+      this.showModal = true;
+    },
+    
+    showEditModal(group) {
+      this.editingGroup = group;
+      this.formData = {
+        id: group.id,
+        name: group.name,
+        description: group.description
+      };
+      this.showModal = true;
+    },
+    
+    async showMembersModal(group) {
+      this.currentGroup = group;
+      try {
+        const data = await API.get(`/groups/${group.id}/members`);
+        this.members = data.members || [];
+        this.showMembersModal = true;
+      } catch (error) {
+        Toast.error('Failed to load members');
+      }
+    },
+    
+    closeModal() {
+      this.showModal = false;
+      this.editingGroup = null;
+    },
+    
+    closeMembersModal() {
+      this.showMembersModal = false;
+      this.currentGroup = null;
+      this.members = [];
+      this.newMemberId = '';
+    },
+    
+    async saveGroup() {
+      try {
+        if (this.editingGroup) {
+          await API.put(`/groups/${this.formData.id}`, this.formData);
+          Toast.success('Group updated');
+        } else {
+          await API.post('/groups', this.formData);
+          Toast.success('Group created');
+        }
+        this.closeModal();
+        await this.loadGroups();
+      } catch (error) {
+        Toast.error(error.message);
+      }
+    },
+    
+    async addMember() {
+      if (!this.newMemberId) return;
+      
+      try {
+        await API.post(`/groups/${this.currentGroup.id}/members`, {
+          userId: this.newMemberId,
+          role: 'member'
+        });
+        Toast.success('Member added');
+        this.newMemberId = '';
+        
+        // Reload members
+        const data = await API.get(`/groups/${this.currentGroup.id}/members`);
+        this.members = data.members || [];
+      } catch (error) {
+        Toast.error(error.message);
+      }
+    },
+    
+    async removeMember(userId) {
+      try {
+        await API.delete(`/groups/${this.currentGroup.id}/members/${userId}`);
+        Toast.success('Member removed');
+        
+        // Reload members
+        const data = await API.get(`/groups/${this.currentGroup.id}/members`);
+        this.members = data.members || [];
+      } catch (error) {
+        Toast.error(error.message);
+      }
+    },
+    
+    confirmDelete(group) {
+      Modal.confirm(
+        'Delete Group',
+        `Are you sure you want to delete group "${group.name}"? This action cannot be undone.`,
+        async () => {
+          try {
+            await API.delete(`/groups/${group.id}`);
+            Toast.success('Group deleted');
+            await this.loadGroups();
+          } catch (error) {
+            Toast.error(error.message);
+          }
+        }
+      );
+    }
+  };
+}
+</script>
