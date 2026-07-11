@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"time"
@@ -55,8 +56,13 @@ func NewHandler(db *sql.DB, users *user.Store, roles *roles.Store, throttler *th
 
 // RegisterRoutes registers admin panel routes
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	// Static files
-	mux.Handle("/admin/static/", http.FileServer(http.FS(staticFS)))
+	// Static files — embed has "static/" prefix, strip it so /admin/static/styles.css works
+	staticSubFS, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		h.log.Error("failed to create static sub-filesystem", "error", err)
+	} else {
+		mux.Handle("/admin/static/", http.StripPrefix("/admin/static/", http.FileServer(http.FS(staticSubFS))))
+	}
 
 	// Logout
 	mux.HandleFunc("/admin/logout", h.logout)
