@@ -26,6 +26,7 @@ import (
 	"cetus-marketdata-scanner/internal/bootstrap"
 	"cetus-marketdata-scanner/internal/config"
 	"cetus-marketdata-scanner/internal/dashboard"
+	"cetus-marketdata-scanner/internal/dblog"
 	"cetus-marketdata-scanner/internal/digest"
 	"cetus-marketdata-scanner/internal/groups"
 	"cetus-marketdata-scanner/internal/permissions"
@@ -108,28 +109,31 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 		return nil, fmt.Errorf("open snapshot store: %w", err)
 	}
 
+	// Centralized loggable DB — all stores use this single instance
+	db := dblog.New(snap.DB(), log)
+
 	// Run schema migrations (creates users, roles, groups, etc.)
-	if err := schema.Migrate(snap.DB()); err != nil {
+	if err := schema.Migrate(db.DB()); err != nil {
 		st.Close()
 		snap.Close()
 		return nil, fmt.Errorf("migrate schema: %w", err)
 	}
 
-	users, err := user.OpenStoreWithDB(snap.DB(), cfg.UsersPath)
+	users, err := user.OpenStoreWithDB(db.DB(), cfg.UsersPath)
 	if err != nil {
 		st.Close()
 		snap.Close()
 		return nil, fmt.Errorf("open users: %w", err)
 	}
 
-	studyStore, err := study.OpenStoreWithDB(snap.DB(), cfg.StudiesPath)
+	studyStore, err := study.OpenStoreWithDB(db.DB(), cfg.StudiesPath)
 	if err != nil {
 		st.Close()
 		snap.Close()
 		return nil, fmt.Errorf("open studies: %w", err)
 	}
 
-	subStore, err := study.OpenSubscriptionStoreWithDB(snap.DB(), cfg.SubscriptionsPath)
+	subStore, err := study.OpenSubscriptionStoreWithDB(db.DB(), cfg.SubscriptionsPath)
 	if err != nil {
 		st.Close()
 		snap.Close()
@@ -180,12 +184,12 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 	catalogBytes, _ := json.Marshal(predicate.BuildCatalog())
 
 	// Initialize groups and results stores
-	groupsStore := groups.NewStore(snap.DB())
-	resultsStore := results.NewStore(snap.DB())
-	permChecker := permissions.NewChecker(permissions.NewDBAccessChecker(snap.DB()))
+	groupsStore := groups.NewStore(db.DB())
+	resultsStore := results.NewStore(db.DB())
+	permChecker := permissions.NewChecker(permissions.NewDBAccessChecker(db.DB()))
 
 	// Initialize roles and throttling
-	rolesStore := roles.NewStore(snap.DB())
+	rolesStore := roles.NewStore(db.DB())
 	if err := rolesStore.Init(); err != nil {
 		return nil, fmt.Errorf("init roles: %w", err)
 	}
@@ -194,11 +198,11 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 	}
 
 	// Bootstrap default admin user if no users exist
-	if err := bootstrap.Bootstrap(snap.DB(), users, rolesStore, log); err != nil {
+	if err := bootstrap.Bootstrap(db.DB(), users, rolesStore, log); err != nil {
 		return nil, fmt.Errorf("bootstrap users: %w", err)
 	}
 
-	throttler := throttle.NewThrottler(snap.DB(), rolesStore)
+	throttler := throttle.NewThrottler(db.DB(), rolesStore)
 	if err := throttler.Init(); err != nil {
 		return nil, fmt.Errorf("init throttler: %w", err)
 	}
@@ -219,7 +223,7 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 		return user.ID, user.IsAdmin(), true
 	}
 	
-	adminHandler, err := admin.NewHandler(snap.DB(), users, rolesStore, throttler, log, validateSession)
+	adminHandler, err := admin.NewHandler(db.DB(), users, rolesStore, throttler, log, validateSession)
 	if err != nil {
 		return nil, fmt.Errorf("init admin: %w", err)
 	}
