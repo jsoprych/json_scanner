@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 )
@@ -14,23 +15,22 @@ type Subscription struct {
 	StudyKey string `json:"study_key"`
 }
 
-// SubscriptionStore manages user subscriptions backed by SQLite with JSONL fallback.
+// SubscriptionStore manages user subscriptions backed by SQLite.
+// JSONL files are for import/export only — NOT synced on writes.
 type SubscriptionStore struct {
-	path string
-	db   *sql.DB // nil = JSONL-only (legacy)
+	db   *sql.DB
 	mu   sync.RWMutex
-	subs map[string]map[string]bool // userID -> studyKey -> exists
+	subs map[string]map[string]bool
 }
 
-// OpenSubscriptionStore opens a subscription store at the given path (legacy, no DB).
+// OpenSubscriptionStore opens a subscription store from JSONL path (legacy, no DB).
 func OpenSubscriptionStore(path string) (*SubscriptionStore, error) {
-	return OpenSubscriptionStoreWithDB(path, nil)
+	return OpenSubscriptionStoreWithDB(nil, path)
 }
 
 // OpenSubscriptionStoreWithDB opens a SQLite-backed subscription store.
-func OpenSubscriptionStoreWithDB(path string, db *sql.DB) (*SubscriptionStore, error) {
+func OpenSubscriptionStoreWithDB(db *sql.DB, jsonlPath string) (*SubscriptionStore, error) {
 	s := &SubscriptionStore{
-		path: path,
 		db:   db,
 		subs: make(map[string]map[string]bool),
 	}
@@ -39,8 +39,8 @@ func OpenSubscriptionStoreWithDB(path string, db *sql.DB) (*SubscriptionStore, e
 		if err := s.loadFromSQL(); err != nil {
 			return nil, fmt.Errorf("load subscriptions from SQLite: %w", err)
 		}
-		if len(s.subs) == 0 {
-			if err := s.loadFromJSONL(); err != nil {
+		if len(s.subs) == 0 && jsonlPath != "" {
+			if err := s.importJSONLFile(jsonlPath); err != nil {
 				return nil, err
 			}
 			s.seedSQL()
@@ -48,10 +48,40 @@ func OpenSubscriptionStoreWithDB(path string, db *sql.DB) (*SubscriptionStore, e
 		return s, nil
 	}
 
-	if err := s.loadFromJSONL(); err != nil {
-		return nil, err
+	if jsonlPath != "" {
+		if err := s.importJSONLFile(jsonlPath); err != nil {
+			return nil, err
+		}
 	}
 	return s, nil
+}
+
+func (s *SubscriptionStore) importJSONLFile(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer f.Close()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	lines := splitLines(string(data))
+	for _, line := range lines {
+		var sub Subscription
+		if err := json.Unmarshal([]byte(line), &sub); err != nil {
+			continue
+		}
+		if s.subs[sub.UserID] == nil {
+			s.subs[sub.UserID] = make(map[string]bool)
+		}
+		s.subs[sub.UserID][sub.StudyKey] = true
+	}
+	return nil
 }
 
 func (s *SubscriptionStore) loadFromSQL() error {
@@ -71,35 +101,6 @@ func (s *SubscriptionStore) loadFromSQL() error {
 		s.subs[userID][studyKey] = true
 	}
 	return rows.Err()
-}
-
-func (s *SubscriptionStore) loadFromJSONL() error {
-	f, err := os.Open(s.path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	defer f.Close()
-	
-	// simple line-by-line read for JSONL
-	data, err := os.ReadFile(s.path)
-	if err != nil {
-		return nil
-	}
-	lines := splitLines(string(data))
-	for _, line := range lines {
-		var sub Subscription
-		if err := json.Unmarshal([]byte(line), &sub); err != nil {
-			continue
-		}
-		if s.subs[sub.UserID] == nil {
-			s.subs[sub.UserID] = make(map[string]bool)
-		}
-		s.subs[sub.UserID][sub.StudyKey] = true
-	}
-	return nil
 }
 
 func (s *SubscriptionStore) seedSQL() {
@@ -157,7 +158,7 @@ func (s *SubscriptionStore) Subscribe(userID, studyKey string) error {
 	if s.db != nil {
 		s.db.Exec("INSERT OR IGNORE INTO subscriptions (user_id, study_key) VALUES (?, ?)", userID, studyKey)
 	}
-	return s.save()
+	return nil
 }
 
 // Unsubscribe removes a subscription for a user from a study.
@@ -175,7 +176,7 @@ func (s *SubscriptionStore) Unsubscribe(userID, studyKey string) error {
 	if s.db != nil {
 		s.db.Exec("DELETE FROM subscriptions WHERE user_id = ? AND study_key = ?", userID, studyKey)
 	}
-	return s.save()
+	return nil
 }
 
 // IsSubscribed checks if a user is subscribed to a study.
@@ -219,21 +220,14 @@ func (s *SubscriptionStore) GetStudySubscribers(studyKey string) []string {
 	return users
 }
 
-// save writes all subscriptions to disk.
-func (s *SubscriptionStore) save() error {
-	f, err := os.Create(s.path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	enc := json.NewEncoder(f)
+// ExportJSONL writes all subscriptions as JSONL to w.
+func (s *SubscriptionStore) ExportJSONL(w io.Writer) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	enc := json.NewEncoder(w)
 	for userID, studies := range s.subs {
 		for studyKey := range studies {
-			if err := enc.Encode(Subscription{
-				UserID:   userID,
-				StudyKey: studyKey,
-			}); err != nil {
+			if err := enc.Encode(Subscription{UserID: userID, StudyKey: studyKey}); err != nil {
 				return err
 			}
 		}
@@ -245,23 +239,27 @@ func (s *SubscriptionStore) save() error {
 func (s *SubscriptionStore) DeleteUserSubscriptions(userID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
 	delete(s.subs, userID)
-	return s.save()
+	if s.db != nil {
+		s.db.Exec("DELETE FROM subscriptions WHERE user_id = ?", userID)
+	}
+	return nil
 }
 
 // DeleteStudySubscriptions removes all subscriptions for a study.
 func (s *SubscriptionStore) DeleteStudySubscriptions(studyKey string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
 	for userID, studies := range s.subs {
 		delete(studies, studyKey)
 		if len(studies) == 0 {
 			delete(s.subs, userID)
 		}
 	}
-	return s.save()
+	if s.db != nil {
+		s.db.Exec("DELETE FROM subscriptions WHERE study_key = ?", studyKey)
+	}
+	return nil
 }
 
 // Count returns the total number of subscriptions.

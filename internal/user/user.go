@@ -201,47 +201,62 @@ func (r *Registry) Find(id string) (User, bool) {
 // All returns every user, in file order.
 func (r *Registry) All() []User { return r.all }
 
-// Store is a mutable user registry backed by SQLite with JSONL fallback.
+// Store is a mutable user registry backed by SQLite.
+// JSONL files are for import/export only — NOT synced on writes.
 type Store struct {
-	path string
-	db   *sql.DB // nil = JSONL-only (legacy)
+	db   *sql.DB
 	mu   sync.Mutex
 	all  []User
 	byID map[string]User
 }
 
-// OpenStore loads a user store from path (a missing file yields an empty store).
+// OpenStore loads a user store from JSONL path (legacy, no DB).
 func OpenStore(path string) (*Store, error) {
-	return OpenStoreWithDB(path, nil)
-}
-
-// OpenStoreWithDB opens a SQLite-backed user store. If db is nil, uses JSONL only.
-func OpenStoreWithDB(path string, db *sql.DB) (*Store, error) {
-	s := &Store{path: path, db: db, byID: map[string]User{}}
-
-	// Try loading from SQLite first
-	if db != nil {
-		if err := s.loadFromSQL(); err != nil {
-			return nil, fmt.Errorf("load users from SQLite: %w", err)
-		}
-		// If SQLite is empty, seed from JSONL
-		if len(s.all) == 0 {
-			if err := s.loadFromJSONL(); err != nil {
-				return nil, err
-			}
-			// Seed SQLite from JSONL
-			for _, u := range s.all {
-				s.saveToSQL(u)
-			}
-		}
-		return s, nil
-	}
-
-	// JSONL-only fallback
-	if err := s.loadFromJSONL(); err != nil {
+	s := &Store{byID: map[string]User{}}
+	if err := s.importJSONLFile(path); err != nil {
 		return nil, err
 	}
 	return s, nil
+}
+
+// OpenStoreWithDB opens a SQLite-backed user store.
+func OpenStoreWithDB(db *sql.DB, jsonlPath string) (*Store, error) {
+	s := &Store{db: db, byID: map[string]User{}}
+
+	if err := s.loadFromSQL(); err != nil {
+		return nil, fmt.Errorf("load users from SQLite: %w", err)
+	}
+
+	// One-time migration: if SQLite is empty, import from JSONL
+	if len(s.all) == 0 && jsonlPath != "" {
+		if err := s.importJSONLFile(jsonlPath); err != nil {
+			return nil, err
+		}
+		for _, u := range s.all {
+			s.saveToSQL(u)
+		}
+	}
+	return s, nil
+}
+
+func (s *Store) importJSONLFile(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer f.Close()
+	reg, err := LoadJSONL(f)
+	if err != nil {
+		return err
+	}
+	for _, u := range reg.all {
+		s.all = append(s.all, u)
+		s.byID[u.ID] = u
+	}
+	return nil
 }
 
 func (s *Store) loadFromSQL() error {
@@ -267,26 +282,6 @@ func (s *Store) loadFromSQL() error {
 		s.byID[u.ID] = u
 	}
 	return rows.Err()
-}
-
-func (s *Store) loadFromJSONL() error {
-	f, err := os.Open(s.path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	defer f.Close()
-	reg, err := LoadJSONL(f)
-	if err != nil {
-		return err
-	}
-	s.all = reg.all
-	for _, u := range s.all {
-		s.byID[u.ID] = u
-	}
-	return nil
 }
 
 func (s *Store) saveToSQL(u User) {
@@ -344,7 +339,7 @@ func (s *Store) Create(u User) error {
 	s.all = append(s.all, u)
 	s.byID[u.ID] = u
 	s.saveToSQL(u)
-	return s.save()
+	return nil
 }
 
 // mutate applies fn to the stored user and persists.
@@ -356,7 +351,7 @@ func (s *Store) mutate(id string, fn func(*User)) error {
 			fn(&s.all[i])
 			s.byID[id] = s.all[i]
 			s.saveToSQL(s.all[i])
-			return s.save()
+			return nil
 		}
 	}
 	return fmt.Errorf("user %q not found", id)
@@ -400,31 +395,23 @@ func (s *Store) Delete(id string) error {
 		}
 	}
 	s.all = out
-	return s.save()
+	return nil
 }
 
-// save atomically rewrites the JSONL file. Caller holds the lock.
-func (s *Store) save() error {
-	tmp := s.path + ".tmp"
-	f, err := os.Create(tmp)
-	if err != nil {
-		return err
-	}
-	w := bufio.NewWriter(f)
-	fmt.Fprintln(w, "# Users — one JSON per line. tier: free|pro · role: user|admin. Managed by the admin dashboard.")
+// ExportJSONL writes all users as JSONL to w.
+func (s *Store) ExportJSONL(w io.Writer) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	enc := json.NewEncoder(w)
 	for _, u := range s.all {
 		if err := enc.Encode(u); err != nil {
-			f.Close()
 			return err
 		}
 	}
-	if err := w.Flush(); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.path)
+	return nil
+}
+
+// ImportJSONL imports users from a JSONL file. Existing users are skipped.
+func (s *Store) ImportJSONL(path string) error {
+	return s.importJSONLFile(path)
 }

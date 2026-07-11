@@ -1,10 +1,10 @@
 package study
 
 import (
-	"bufio"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -12,10 +12,10 @@ import (
 	"cetus-marketdata-scanner/internal/user"
 )
 
-// Store is a mutable set of studies backed by SQLite with JSONL fallback.
+// Store is a mutable set of studies backed by SQLite.
+// JSONL files are for import/export only — NOT synced on writes.
 type Store struct {
-	path  string
-	db    *sql.DB // nil = JSONL-only (legacy)
+	db    *sql.DB
 	mu    sync.Mutex
 	all   []Study
 	byKey map[string]Study
@@ -23,32 +23,51 @@ type Store struct {
 
 // OpenStore loads studies from JSONL path (legacy, no DB).
 func OpenStore(path string) (*Store, error) {
-	return OpenStoreWithDB(path, nil)
-}
-
-// OpenStoreWithDB opens a SQLite-backed study store.
-func OpenStoreWithDB(path string, db *sql.DB) (*Store, error) {
-	s := &Store{path: path, db: db, byKey: map[string]Study{}}
-
-	if db != nil {
-		if err := s.loadFromSQL(); err != nil {
-			return nil, fmt.Errorf("load studies from SQLite: %w", err)
-		}
-		if len(s.all) == 0 {
-			if err := s.loadFromJSONL(); err != nil {
-				return nil, err
-			}
-			for _, st := range s.all {
-				s.saveToSQL(st)
-			}
-		}
-		return s, nil
-	}
-
-	if err := s.loadFromJSONL(); err != nil {
+	s := &Store{byKey: map[string]Study{}}
+	if err := s.importJSONLFile(path); err != nil {
 		return nil, err
 	}
 	return s, nil
+}
+
+// OpenStoreWithDB opens a SQLite-backed study store.
+func OpenStoreWithDB(db *sql.DB, jsonlPath string) (*Store, error) {
+	s := &Store{db: db, byKey: map[string]Study{}}
+
+	if err := s.loadFromSQL(); err != nil {
+		return nil, fmt.Errorf("load studies from SQLite: %w", err)
+	}
+
+	// One-time migration: if SQLite is empty, import from JSONL
+	if len(s.all) == 0 && jsonlPath != "" {
+		if err := s.importJSONLFile(jsonlPath); err != nil {
+			return nil, err
+		}
+		for _, st := range s.all {
+			s.saveToSQL(st)
+		}
+	}
+	return s, nil
+}
+
+func (s *Store) importJSONLFile(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer f.Close()
+	all, err := LoadJSONL(f)
+	if err != nil {
+		return err
+	}
+	for _, st := range all {
+		s.all = append(s.all, st)
+		s.byKey[st.Key] = st
+	}
+	return nil
 }
 
 func (s *Store) loadFromSQL() error {
@@ -66,26 +85,6 @@ func (s *Store) loadFromSQL() error {
 		s.byKey[st.Key] = st
 	}
 	return rows.Err()
-}
-
-func (s *Store) loadFromJSONL() error {
-	f, err := os.Open(s.path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	defer f.Close()
-	all, err := LoadJSONL(f)
-	if err != nil {
-		return err
-	}
-	s.all = all
-	for _, st := range all {
-		s.byKey[st.Key] = st
-	}
-	return nil
 }
 
 func (s *Store) saveToSQL(st Study) {
@@ -157,7 +156,7 @@ func (s *Store) Upsert(st Study) error {
 	}
 	s.byKey[st.Key] = st
 	s.saveToSQL(st)
-	return s.save()
+	return nil
 }
 
 // Delete removes a study.
@@ -178,31 +177,23 @@ func (s *Store) Delete(key string) error {
 		}
 	}
 	s.all = out
-	return s.save()
+	return nil
 }
 
-// save atomically rewrites the JSONL file. Caller holds the lock.
-func (s *Store) save() error {
-	tmp := s.path + ".tmp"
-	f, err := os.Create(tmp)
-	if err != nil {
-		return err
-	}
-	w := bufio.NewWriter(f)
-	fmt.Fprintln(w, "# Studies — one JSON per line. SQL WHERE over the snapshot. Managed by the admin study editor.")
+// ExportJSONL writes all studies as JSONL to w.
+func (s *Store) ExportJSONL(w io.Writer) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	enc := json.NewEncoder(w)
 	for _, st := range s.all {
 		if err := enc.Encode(st); err != nil {
-			f.Close()
 			return err
 		}
 	}
-	if err := w.Flush(); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.path)
+	return nil
+}
+
+// ImportJSONL imports studies from a JSONL file. Existing studies are updated.
+func (s *Store) ImportJSONL(path string) error {
+	return s.importJSONLFile(path)
 }

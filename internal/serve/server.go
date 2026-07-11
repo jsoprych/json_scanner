@@ -115,21 +115,21 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 		return nil, fmt.Errorf("migrate schema: %w", err)
 	}
 
-	users, err := user.OpenStoreWithDB(cfg.UsersPath, snap.DB())
+	users, err := user.OpenStoreWithDB(snap.DB(), cfg.UsersPath)
 	if err != nil {
 		st.Close()
 		snap.Close()
 		return nil, fmt.Errorf("open users: %w", err)
 	}
 
-	studyStore, err := study.OpenStoreWithDB(cfg.StudiesPath, snap.DB())
+	studyStore, err := study.OpenStoreWithDB(snap.DB(), cfg.StudiesPath)
 	if err != nil {
 		st.Close()
 		snap.Close()
 		return nil, fmt.Errorf("open studies: %w", err)
 	}
 
-	subStore, err := study.OpenSubscriptionStoreWithDB(cfg.SubscriptionsPath, snap.DB())
+	subStore, err := study.OpenSubscriptionStoreWithDB(snap.DB(), cfg.SubscriptionsPath)
 	if err != nil {
 		st.Close()
 		snap.Close()
