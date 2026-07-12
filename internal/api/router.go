@@ -103,6 +103,9 @@ func (h *Handler) Router() http.Handler {
 	mux.HandleFunc("PUT /api/v1/users/{user_id}/limits", h.SetUserLimits)
 	mux.HandleFunc("GET /api/v1/users/{user_id}/usage", h.GetUserUsage)
 
+	// Admin — reset user password
+	mux.HandleFunc("POST /api/v1/users/{id}/reset-password", h.ResetPassword)
+	
 	// Users — import/export
 	mux.HandleFunc("GET /api/v1/users/export", h.ExportUsers)
 	mux.HandleFunc("POST /api/v1/users/import", h.ImportUsers)
