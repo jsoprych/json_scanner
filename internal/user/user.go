@@ -225,19 +225,32 @@ func OpenStore(path string) (*Store, error) {
 func OpenStoreWithDB(db *sql.DB, jsonlPath string) (*Store, error) {
 	s := &Store{db: db, byID: map[string]User{}}
 
-	if err := s.loadFromSQL(); err != nil {
-		// SQLite load failed (e.g. missing column) — fall through to JSONL
-		s.all = nil
-		s.byID = map[string]User{}
+	// Load from SQLite first
+	sqlOK := s.loadFromSQL() == nil
+
+	// If SQLite load failed or users are missing passwords, reload from JSONL
+	needPasswords := false
+	if sqlOK && len(s.all) > 0 {
+		for _, u := range s.all {
+			if !u.HasPassword() {
+				needPasswords = true
+				break
+			}
+		}
 	}
 
-	// One-time migration: if SQLite is empty, import from JSONL
-	if len(s.all) == 0 && jsonlPath != "" {
-		if err := s.importJSONLFile(jsonlPath); err != nil {
-			return nil, err
-		}
-		for _, u := range s.all {
-			s.saveToSQL(u)
+	if !sqlOK || len(s.all) == 0 || needPasswords {
+		if jsonlPath != "" {
+			// Reset and reload from JSONL (has auth data)
+			s.all = nil
+			s.byID = map[string]User{}
+			if err := s.importJSONLFile(jsonlPath); err != nil {
+				return nil, err
+			}
+			// Sync passwords back to SQLite
+			for _, u := range s.all {
+				s.saveToSQL(u)
+			}
 		}
 	}
 	return s, nil
