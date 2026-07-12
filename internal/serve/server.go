@@ -390,6 +390,11 @@ func (s *Server) requireUser(w http.ResponseWriter, r *http.Request) (user.User,
 	if s.cfg.AuthMode == AuthModeProxy {
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprintf(w, "401 — no identity from proxy (missing %s header)\n", s.cfg.TrustedUserHeader)
+	} else if r.Header.Get("X-Requested-With") == "XMLHttpRequest" {
+		// AJAX — return JSON, don't redirect
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprintf(w, `{"error":"session expired"}`)
 	} else {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 	}

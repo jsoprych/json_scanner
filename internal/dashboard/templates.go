@@ -433,6 +433,7 @@ _g('studyForm').addEventListener('submit',function(ev){
   var r=_g('s_result');if(r)r.textContent='saving…';
   var fd=new FormData(ev.target);
   fetch('/studies',{method:'POST',body:fd,headers:{'X-Requested-With':'XMLHttpRequest'}}).then(function(resp){
+    if(!resp.ok){return resp.text().then(function(t){throw new Error(resp.status+' '+resp.statusText+': '+t);});}
     return resp.json();
   }).then(function(d){
     if(d.error){if(r)r.textContent='✗ '+d.error;return}
