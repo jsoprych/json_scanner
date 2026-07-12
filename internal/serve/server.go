@@ -70,6 +70,11 @@ type Server struct {
 	
 	// Session validator shared between admin panel and API
 	sessionValidator func(cookie string) (userID string, isAdmin bool, valid bool)
+	
+	// Login rate limiting (in-memory, per-IP)
+	loginAttempts    map[string][]time.Time  // IP → recent attempt timestamps
+	loginAttemptsMu  sync.Mutex
+	loginGuard      *loginGuard             // per-account lockout
 
 	jwtVer interface {
 		Verify(string) (string, error)
@@ -224,6 +229,11 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 		return nil, fmt.Errorf("init admin: %w", err)
 	}
 
+	loginGuard, err := newLoginGuard(snap.RawDB())
+	if err != nil {
+		return nil, fmt.Errorf("init login guard: %w", err)
+	}
+
 	return &Server{
 		cfg: cfg, log: log, ctx: ctx,
 		warehouse: st, snap: snap, users: users, studies: studyStore, subs: subStore,
@@ -235,6 +245,8 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 		sessTTL:      time.Duration(cfg.SessionHours) * time.Hour,
 		ttl:          time.Duration(cfg.ServeTTLSecs) * time.Second,
 		catalogBytes: catalogBytes,
+		loginAttempts: make(map[string][]time.Time),
+		loginGuard:    loginGuard,
 	}, nil
 }
 
@@ -260,7 +272,7 @@ func (s *Server) Run() {
 		s.log.Error("cannot bind dashboard address (port already in use?)", "addr", s.cfg.ServeAddr, "error", err)
 		os.Exit(1)
 	}
-	srv := &http.Server{Handler: mux.ServeMux, ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{Handler: accessLog(s.log, mux.ServeMux), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-s.ctx.Done()
 		shCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

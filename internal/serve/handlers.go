@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"cetus-marketdata-scanner/internal/alert"
 	"cetus-marketdata-scanner/internal/api"
@@ -99,14 +100,54 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodPost {
+		// Rate limit login attempts — 5 per 60s per IP
+		ip := r.Header.Get("X-Forwarded-For")
+		if ip == "" {
+			ip = r.RemoteAddr
+		}
+		s.loginAttemptsMu.Lock()
+		now := time.Now()
+		cutoff := now.Add(-60 * time.Second)
+		attempts := s.loginAttempts[ip]
+		var recent []time.Time
+		for _, t := range attempts {
+			if t.After(cutoff) {
+				recent = append(recent, t)
+			}
+		}
+		s.loginAttempts[ip] = recent
+		count := len(recent)
+		s.loginAttemptsMu.Unlock()
+		if count >= 5 {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusTooManyRequests)
+			dashboard.Login{Error: "Too many attempts. Wait 60 seconds.", Users: s.users.All()}.HTML(w)
+			return
+		}
+
 		r.ParseForm()
-		u, ok := s.users.Find(r.FormValue("user"))
+		userID := r.FormValue("user")
+
+		// Check account lockout (per-user, SQLite-backed)
+		if msg, ok := s.loginGuard.Check(userID); !ok {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusTooManyRequests)
+			dashboard.Login{Error: msg, Users: s.users.All()}.HTML(w)
+			return
+		}
+
+		u, ok := s.users.Find(userID)
 		if !ok || !u.CheckPassword(r.FormValue("password")) {
+			s.loginAttemptsMu.Lock()
+			s.loginAttempts[ip] = append(s.loginAttempts[ip], time.Now())
+			s.loginAttemptsMu.Unlock()
+			s.loginGuard.RecordFailure(userID) // track per-account
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusUnauthorized)
 			dashboard.Login{Error: "Invalid user or password (or the account is disabled).", Users: s.users.All()}.HTML(w)
 			return
 		}
+		s.loginGuard.RecordSuccess(userID) // clear on success
 		tok := s.sessions.create(u.ID, s.sessTTL)
 		http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: tok, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: int(s.sessTTL.Seconds())})
 		http.Redirect(w, r, "/", http.StatusSeeOther)
