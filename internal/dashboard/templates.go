@@ -384,7 +384,7 @@ const loginSrc = `{{define "login"}}<!doctype html><html lang="en"><head>` + hea
       {{if .Error}}<div class="u-down" style="font-size:13px;margin-bottom:12px">{{.Error}}</div>{{end}}
       <form method="post" action="/login">
         <div class="field" style="margin-bottom:12px"><label>User</label><input class="input" name="user" autofocus autocomplete="username"></div>
-        <div class="field" style="margin-bottom:16px"><label>Password</label><input class="input" name="password" type="password" autocomplete="current-password"></div>
+        <div class="field" style="margin-bottom:16px;position:relative"><label>Password</label><input class="input" name="password" id="pw" type="password" autocomplete="current-password"><button type="button" id="pwToggle" style="position:absolute;right:8px;bottom:8px;background:none;border:none;cursor:pointer;font-size:16px" onclick="var p=document.getElementById('pw');var t=p.type==='password'?'text':'password';p.type=t;this.textContent=t==='password'?'👁':'👁‍🗨';return false" title="Show password">👁</button></div>
         <div id="loginSpinner" style="display:none;text-align:center;padding:10px">⏳ Scanning universe, please wait…</div>
         <button class="btn btn--primary" id="loginBtn" type="submit" style="width:100%;padding:10px">Sign in</button>
       </form>
