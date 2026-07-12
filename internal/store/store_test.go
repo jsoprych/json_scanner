@@ -87,7 +87,7 @@ func TestOpenReadOnly(t *testing.T) {
 	path := createTestDB(t)
 	ctx := context.Background()
 
-	st, err := OpenReadOnly(ctx, path)
+	st, err := OpenReadOnly(ctx, path, 5000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestCheckSchema(t *testing.T) {
 	path := createTestDB(t)
 	ctx := context.Background()
 
-	st, err := OpenReadOnly(ctx, path)
+	st, err := OpenReadOnly(ctx, path, 5000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestUniverse(t *testing.T) {
 	path := createTestDB(t)
 	ctx := context.Background()
 
-	st, err := OpenReadOnly(ctx, path)
+	st, err := OpenReadOnly(ctx, path, 5000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestUniverseCommon(t *testing.T) {
 	path := createTestDB(t)
 	ctx := context.Background()
 
-	st, err := OpenReadOnly(ctx, path)
+	st, err := OpenReadOnly(ctx, path, 5000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestLoadAdjustedBars(t *testing.T) {
 	path := createTestDB(t)
 	ctx := context.Background()
 
-	st, err := OpenReadOnly(ctx, path)
+	st, err := OpenReadOnly(ctx, path, 5000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestBarsTablePreference(t *testing.T) {
 	db.Close()
 
 	ctx := context.Background()
-	st, err := OpenReadOnly(ctx, path)
+	st, err := OpenReadOnly(ctx, path, 5000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestStats(t *testing.T) {
 	path := createTestDB(t)
 	ctx := context.Background()
 
-	st, err := OpenReadOnly(ctx, path)
+	st, err := OpenReadOnly(ctx, path, 5000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestStats(t *testing.T) {
 
 func TestOpenReadOnlyMissing(t *testing.T) {
 	ctx := context.Background()
-	_, err := OpenReadOnly(ctx, "/nonexistent/path.db")
+	_, err := OpenReadOnly(ctx, "/nonexistent/path.db", 5000)
 	if err == nil {
 		t.Error("expected error for missing db")
 	}
@@ -257,7 +257,7 @@ func TestSchemaVersionZero(t *testing.T) {
 	db.Close()
 
 	ctx := context.Background()
-	st, err := OpenReadOnly(ctx, path)
+	st, err := OpenReadOnly(ctx, path, 5000)
 	if err != nil {
 		t.Fatal(err)
 	}

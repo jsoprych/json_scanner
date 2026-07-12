@@ -110,7 +110,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		s.loginAttemptsMu.Lock()
 		now := time.Now()
-		cutoff := now.Add(-60 * time.Second)
+		cutoff := now.Add(-time.Duration(s.cfg.LoginRateWindowSecs) * time.Second)
 		attempts := s.loginAttempts[ip]
 		var recent []time.Time
 		for _, t := range attempts {
@@ -121,7 +121,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.loginAttempts[ip] = recent
 		count := len(recent)
 		s.loginAttemptsMu.Unlock()
-		if count >= 5 {
+		if count >= s.cfg.LoginRateMaxAttempts {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusTooManyRequests)
 			dashboard.Login{Error: "Too many attempts. Wait 60 seconds.", Users: s.users.All()}.HTML(w)
@@ -298,13 +298,13 @@ func (s *Server) handleCompile(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(resp{Error: "bad request: " + err.Error()})
 		return
 	}
-	compiled, err := predicate.Compile(def, resultLimit(u))
+	compiled, err := predicate.Compile(def, s.resultLimit(u))
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(resp{Error: err.Error()})
 		return
 	}
-	matches, err := s.preview(study.Study{Where: compiled.Where, OrderBy: compiled.OrderBy, Limit: resultLimit(u)})
+	matches, err := s.preview(study.Study{Where: compiled.Where, OrderBy: compiled.OrderBy, Limit: s.resultLimit(u)})
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(resp{Error: err.Error()})
@@ -524,7 +524,7 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 		case current == newPw:
 			errorMsg = "Must differ from current"
 		default:
-			if perr := auth.ValidatePassword(newPw, auth.DefaultPolicy()); perr != nil {
+			if perr := auth.ValidatePassword(newPw, auth.PasswordPolicy{MinLength: s.cfg.PasswordMinLength, RequireUpper: s.cfg.PasswordRequireUpper, RequireDigit: s.cfg.PasswordRequireDigit}); perr != nil {
 				errorMsg = perr.Error()
 			} else if serr := s.users.SetPassword(u.ID, newPw); serr != nil {
 				errorMsg = "Update failed"
@@ -549,14 +549,14 @@ func (s *Server) handleSignup(w http.ResponseWriter, r *http.Request) {
 		pw := r.FormValue("password")
 		confirm := r.FormValue("confirm")
 		switch {
-		case len(userID) < 3 || len(userID) > 32:
-			errorMsg = "Username: 3-32 characters"
+		case len(userID) < s.cfg.UsernameMinLength || len(userID) > s.cfg.UsernameMaxLength:
+			errorMsg = fmt.Sprintf("Username: %d-%d characters", s.cfg.UsernameMinLength, s.cfg.UsernameMaxLength)
 		case !validUsername(userID):
 			errorMsg = "Username: letters, numbers, underscores only"
 		case pw != confirm:
 			errorMsg = "Passwords do not match"
 		default:
-			if err := auth.ValidatePassword(pw, auth.DefaultPolicy()); err != nil {
+			if err := auth.ValidatePassword(pw, auth.PasswordPolicy{MinLength: s.cfg.PasswordMinLength, RequireUpper: s.cfg.PasswordRequireUpper, RequireDigit: s.cfg.PasswordRequireDigit}); err != nil {
 				errorMsg = err.Error()
 			} else if _, exists := s.users.Find(userID); exists {
 				errorMsg = "Username already taken"

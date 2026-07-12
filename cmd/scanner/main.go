@@ -139,7 +139,7 @@ func runUsers(log *slog.Logger, cfg config.Config) {
 // openUniverse opens the warehouse read-only and returns the scannable symbols,
 // capped by MaxSymbols. Callers own Close via the returned store.
 func openUniverse(ctx context.Context, log *slog.Logger, cfg config.Config) (*store.Store, []string) {
-	st, err := store.OpenReadOnly(ctx, cfg.DBPath)
+	st, err := store.OpenReadOnly(ctx, cfg.DBPath, cfg.SQLiteBusyTimeoutMS)
 	if err != nil {
 		log.Error("open warehouse failed", "db", cfg.DBPath, "error", err)
 		os.Exit(1)

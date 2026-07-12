@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"cetus-marketdata-scanner/internal/admin"
+	"cetus-marketdata-scanner/internal/auth"
 	"cetus-marketdata-scanner/internal/alert"
 	"cetus-marketdata-scanner/internal/api"
 	"cetus-marketdata-scanner/internal/authjwt"
@@ -102,7 +103,7 @@ type Server struct {
 
 // New creates a Server. The caller must invoke Run to start serving.
 func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, error) {
-	st, err := store.OpenReadOnly(ctx, cfg.DBPath)
+	st, err := store.OpenReadOnly(ctx, cfg.DBPath, cfg.SQLiteBusyTimeoutMS)
 	if err != nil {
 		return nil, fmt.Errorf("open warehouse: %w", err)
 	}
@@ -229,7 +230,7 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 		return nil, fmt.Errorf("init admin: %w", err)
 	}
 
-	loginGuard, err := newLoginGuard(snap.RawDB())
+	loginGuard, err := auth.NewLoginGuard(snap.RawDB(), cfg.LoginMaxFailures, cfg.LoginLockoutSecs)
 	if err != nil {
 		return nil, fmt.Errorf("init login guard: %w", err)
 	}
@@ -272,7 +273,7 @@ func (s *Server) Run() {
 		s.log.Error("cannot bind dashboard address (port already in use?)", "addr", s.cfg.ServeAddr, "error", err)
 		os.Exit(1)
 	}
-	srv := &http.Server{Handler: accessLog(s.log, mux.ServeMux), ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{Handler: accessLog(s.log, mux.ServeMux), ReadHeaderTimeout: time.Duration(s.cfg.HTTPHeaderTimeoutSecs) * time.Second}
 	go func() {
 		<-s.ctx.Done()
 		shCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -583,13 +584,13 @@ func (s *sessionStore) delete(tok string) {
 	s.mu.Unlock()
 }
 
-// resultLimit is server-owned (never client-supplied): free tier shows 25 with a
-// +1 probe for has_more; pro sees more.
-func resultLimit(u user.User) int {
+// resultLimit is server-owned (never client-supplied): free tier shows N with a
+// +1 probe for has_more; pro sees more. Configurable via env vars.
+func (s *Server) resultLimit(u user.User) int {
 	if u.Tier == user.TierPro || u.IsAdmin() {
-		return 101
+		return s.cfg.ResultLimitPro
 	}
-	return 26
+	return s.cfg.ResultLimitFree
 }
 
 // ensure interfaces are satisfied

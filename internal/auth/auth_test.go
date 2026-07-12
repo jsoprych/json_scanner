@@ -189,7 +189,7 @@ func TestLoginGuard(t *testing.T) {
 	db := testGuardDB(t)
 	defer db.Close()
 
-	g, err := NewLoginGuard(db)
+	g, err := NewLoginGuard(db, 5, 900)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestLoginGuardSeparateAccounts(t *testing.T) {
 	db := testGuardDB(t)
 	defer db.Close()
 
-	g, _ := NewLoginGuard(db)
+	g, _ := NewLoginGuard(db, 5, 900)
 
 	// Lock alice
 	for i := 0; i < 5; i++ {

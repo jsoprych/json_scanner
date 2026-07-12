@@ -7,13 +7,14 @@ import (
 )
 
 // LoginGuard tracks per-account failed login attempts and lockout.
-// Stores state in SQLite (or any *sql.DB compatible database).
 type LoginGuard struct {
-	db *sql.DB
+	db          *sql.DB
+	maxFailures int
+	lockoutSecs int
 }
 
 // NewLoginGuard creates a login guard. Call once at startup.
-func NewLoginGuard(db *sql.DB) (*LoginGuard, error) {
+func NewLoginGuard(db *sql.DB, maxFailures, lockoutSecs int) (*LoginGuard, error) {
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS login_audit (
 		user_id TEXT PRIMARY KEY,
 		failures INTEGER NOT NULL DEFAULT 0,
@@ -22,11 +23,10 @@ func NewLoginGuard(db *sql.DB) (*LoginGuard, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &LoginGuard{db: db}, nil
+	return &LoginGuard{db: db, maxFailures: maxFailures, lockoutSecs: lockoutSecs}, nil
 }
 
-// Check returns (error message, allowed). If the account is locked,
-// returns the reason and false. Otherwise returns true.
+// Check returns (error message, allowed).
 func (g *LoginGuard) Check(userID string) (string, bool) {
 	var failures int
 	var lockedUntil int64
@@ -44,14 +44,14 @@ func (g *LoginGuard) Check(userID string) (string, bool) {
 	return "", true
 }
 
-// RecordFailure increments the failure counter. Locks account after 5 failures.
+// RecordFailure increments the failure counter.
 func (g *LoginGuard) RecordFailure(userID string) {
 	var failures int
 	g.db.QueryRow("SELECT failures FROM login_audit WHERE user_id = ?", userID).Scan(&failures)
 	failures++
 	locked := int64(0)
-	if failures >= 5 {
-		locked = time.Now().Unix() + 900 // 15 minutes
+	if failures >= g.maxFailures {
+		locked = time.Now().Unix() + int64(g.lockoutSecs)
 	}
 	g.db.Exec("INSERT OR REPLACE INTO login_audit (user_id, failures, locked_until) VALUES (?, ?, ?)",
 		userID, failures, locked)

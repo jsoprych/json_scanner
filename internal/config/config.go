@@ -83,6 +83,27 @@ type Config struct {
 	// OpenSignup enables self-registration (default false).
 	OpenSignup bool
 
+	// --- Auth & Security ---
+
+	LoginLockoutSecs    int    // Account lockout duration (default 900 = 15 min)
+	LoginMaxFailures    int    // Max failed attempts before lockout (default 5)
+	LoginRateWindowSecs int    // Login rate-limit window per IP (default 60)
+	LoginRateMaxAttempts int   // Max login attempts per window per IP (default 5)
+	BootstrapAdminPW    string // Default admin password on first run (default "admin")
+	PasswordMinLength   int    // Minimum password length (default 8)
+	PasswordRequireUpper bool  // Require uppercase in passwords (default true)
+	PasswordRequireDigit bool  // Require digit/special in passwords (default true)
+	UsernameMinLength   int    // Minimum username length (default 3)
+	UsernameMaxLength   int    // Maximum username length (default 32)
+	ResultLimitFree     int    // Results shown for free tier (default 26)
+	ResultLimitPro      int    // Results shown for pro tier (default 101)
+
+	// --- HTTP Server ---
+
+	HTTPHeaderTimeoutSecs int // HTTP read header timeout (default 5)
+	SQLiteBusyTimeoutMS   int // SQLite busy timeout ms (default 5000)
+	JWTLeewaySecs         int // JWT clock leeway seconds (default 60)
+
 	// --- the scanner's OWN store (separate from the read-only cetus warehouse) ---
 
 	// StoreDB is the scanner's own SQLite DB — it materializes the snapshot here and
@@ -203,6 +224,25 @@ func Load() Config {
 		TLSDomain:   envOr("SCANNER_TLS_DOMAIN", ""),
 		TLSCacheDir: envOr("SCANNER_TLS_CACHE_DIR", "certs"),
 		OpenSignup:  envOr("SCANNER_OPEN_SIGNUP", "") == "true",
+
+		// Auth & Security
+		LoginLockoutSecs:     envInt("SCANNER_LOGIN_LOCKOUT_SECS", 900),
+		LoginMaxFailures:     envInt("SCANNER_LOGIN_MAX_FAILURES", 5),
+		LoginRateWindowSecs:  envInt("SCANNER_LOGIN_RATE_WINDOW_SECS", 60),
+		LoginRateMaxAttempts: envInt("SCANNER_LOGIN_RATE_MAX_ATTEMPTS", 5),
+		BootstrapAdminPW:     envOr("SCANNER_BOOTSTRAP_ADMIN_PW", "admin"),
+		PasswordMinLength:    envInt("SCANNER_PW_MIN_LENGTH", 8),
+		PasswordRequireUpper: envOr("SCANNER_PW_REQUIRE_UPPER", "true") == "true",
+		PasswordRequireDigit: envOr("SCANNER_PW_REQUIRE_DIGIT", "true") == "true",
+		UsernameMinLength:    envInt("SCANNER_USERNAME_MIN_LENGTH", 3),
+		UsernameMaxLength:    envInt("SCANNER_USERNAME_MAX_LENGTH", 32),
+		ResultLimitFree:      envInt("SCANNER_RESULT_LIMIT_FREE", 26),
+		ResultLimitPro:       envInt("SCANNER_RESULT_LIMIT_PRO", 101),
+
+		// HTTP Server
+		HTTPHeaderTimeoutSecs: envInt("SCANNER_HTTP_HEADER_TIMEOUT_SECS", 5),
+		SQLiteBusyTimeoutMS:   envInt("SCANNER_SQLITE_BUSY_TIMEOUT_MS", 5000),
+		JWTLeewaySecs:         envInt("SCANNER_JWT_LEEWAY_SECS", 60),
 
 		// Own store defaults to persistent path at DATA/SCANNER/scanner.db,
 		// resolved relative to the executable. Set SCANNER_STORE_DB to override,

@@ -41,12 +41,12 @@ const MaxSchemaVersion = 1
 
 // OpenReadOnly opens the warehouse read-only. WAL permits concurrent reads
 // alongside the pipeline's single writer; we never write or run DDL.
-func OpenReadOnly(ctx context.Context, path string) (*Store, error) {
+func OpenReadOnly(ctx context.Context, path string, busyTimeoutMS int) (*Store, error) {
 	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
 	if err != nil {
 		return nil, fmt.Errorf("open cetus db %q read-only: %w", path, err)
 	}
-	if _, err := db.ExecContext(ctx, "PRAGMA busy_timeout=5000;"); err != nil {
+	if _, err := db.ExecContext(ctx, fmt.Sprintf("PRAGMA busy_timeout=%d;", busyTimeoutMS)); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply pragma: %w", err)
 	}
