@@ -437,7 +437,7 @@ _g('studyForm').addEventListener('submit',function(ev){
   }).then(function(d){
     if(d.error){if(r)r.textContent='✗ '+d.error;return}
     if(r)r.textContent='✓ saved '+d.key;
-    window.location.reload(); // refresh to show updated study list
+    setTimeout(function(){window.location=window.location.pathname+'#mystudies';},500);
   }).catch(function(e){if(r)r.textContent='✗ '+e;});
 });
 function testStudy(){var b=new URLSearchParams({where:_g('s_where').value,order_by:(_g('s_order')||{}).value||'',limit:(_g('s_limit')||{}).value||'20'});
