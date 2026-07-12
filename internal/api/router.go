@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 )
 
 // Router returns an HTTP handler with all API routes mounted.
@@ -113,5 +114,40 @@ func (h *Handler) Router() http.Handler {
 	mux.HandleFunc("GET /api/v1/roles/export", h.ExportRoles)
 	mux.HandleFunc("POST /api/v1/roles/import", h.ImportRoles)
 
-	return mux
+	// Wrap with usage tracking middleware
+	return h.trackUsage(mux)
+}
+
+// trackUsage wraps an http.Handler with per-request usage tracking.
+func (h *Handler) trackUsage(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip health endpoint
+		if r.URL.Path == "/api/v1/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// Try to identify user from session cookie or JWT
+		userID := ""
+		if cookie, err := r.Cookie("cetus_session"); err == nil && h.validateSession != nil {
+			if id, _, ok := h.validateSession(cookie.Value); ok {
+				userID = id
+			}
+		}
+		if userID == "" {
+			// Try JWT Bearer
+			if auth := r.Header.Get("Authorization"); auth != "" {
+				if h.verifier != nil {
+					token := strings.TrimPrefix(auth, "Bearer ")
+					if id, err := h.verifier.Verify(token); err == nil {
+						userID = id
+					}
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+		// Track after serving so response time is accurate
+		if userID != "" && h.throttler != nil {
+			h.throttler.TrackAPIUsage(userID)
+		}
+	})
 }
