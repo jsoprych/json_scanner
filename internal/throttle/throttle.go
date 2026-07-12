@@ -74,6 +74,46 @@ func (t *Throttler) Init() error {
 	return err
 }
 
+// CheckCreate checks quota BEFORE creating a resource. Returns clear error or nil.
+func (t *Throttler) CheckCreate(userID, resource string) error {
+	limits, err := t.GetEffectiveLimits(userID)
+	if err != nil {
+		return fmt.Errorf("cannot check limits: %w", err)
+	}
+	var current, max int
+	switch resource {
+	case "study":
+		err = t.db.QueryRow("SELECT COUNT(*) FROM studies WHERE owner = ?", userID).Scan(&current)
+		if err != nil {
+			current = 0
+		}
+		max = limits.MaxStudies
+	case "result":
+		err = t.db.QueryRow("SELECT COUNT(*) FROM saved_results WHERE user_id = ?", userID).Scan(&current)
+		if err != nil {
+			current = 0
+		}
+		max = limits.MaxSavedResults
+	case "group":
+		err = t.db.QueryRow("SELECT COUNT(*) FROM groups WHERE owner_id = ?", userID).Scan(&current)
+		if err != nil {
+			current = 0
+		}
+		max = limits.MaxGroups
+	default:
+		return nil
+	}
+	if current >= max {
+		return fmt.Errorf("%s limit: %d of %d used", resource, current, max)
+	}
+	return nil
+}
+
+// TrackCreate tracks resource creation AFTER successful create.
+func (t *Throttler) TrackCreate(userID, resource string) {
+	_ = t.TrackResourceUsage(userID, resource)
+}
+
 // CheckRateLimit checks if user has exceeded rate limits
 func (t *Throttler) CheckRateLimit(userID, action string) error {
 	// Get user role from SQLite (SQLite-first)
@@ -206,41 +246,6 @@ func (t *Throttler) TrackResourceUsage(userID, resource string) error {
 
 	_, err := t.db.Exec(query, userID, today)
 	return err
-}
-
-// CheckQuota checks if user has exceeded resource quota
-func (t *Throttler) CheckQuota(userID, resource string) error {
-	limits, err := t.GetEffectiveLimits(userID)
-	if err != nil {
-		return err
-	}
-
-	var currentCount int
-	var maxCount int
-
-	switch resource {
-	case "study":
-		err = t.db.QueryRow("SELECT COUNT(*) FROM studies WHERE owner = ?", userID).Scan(&currentCount)
-		maxCount = limits.MaxStudies
-	case "result":
-		err = t.db.QueryRow("SELECT COUNT(*) FROM saved_results WHERE user_id = ?", userID).Scan(&currentCount)
-		maxCount = limits.MaxSavedResults
-	case "group":
-		err = t.db.QueryRow("SELECT COUNT(*) FROM groups WHERE owner_id = ?", userID).Scan(&currentCount)
-		maxCount = limits.MaxGroups
-	default:
-		return fmt.Errorf("unknown resource: %s", resource)
-	}
-
-	if err != nil && err != sql.ErrNoRows {
-		return fmt.Errorf("check quota: %w", err)
-	}
-
-	if currentCount >= maxCount {
-		return fmt.Errorf("quota exceeded: %d %s (max: %d)", currentCount, resource, maxCount)
-	}
-
-	return nil
 }
 
 // GetEffectiveLimits returns limits (role defaults + user overrides)
