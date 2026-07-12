@@ -385,8 +385,16 @@ const loginSrc = `{{define "login"}}<!doctype html><html lang="en"><head>` + hea
       <form method="post" action="/login">
         <div class="field" style="margin-bottom:12px"><label>User</label><input class="input" name="user" autofocus autocomplete="username"></div>
         <div class="field" style="margin-bottom:16px"><label>Password</label><input class="input" name="password" type="password" autocomplete="current-password"></div>
-        <button class="btn btn--primary" type="submit" style="width:100%;padding:10px">Sign in</button>
+        <div id="loginSpinner" style="display:none;text-align:center;padding:10px">⏳ Scanning universe, please wait…</div>
+        <button class="btn btn--primary" id="loginBtn" type="submit" style="width:100%;padding:10px">Sign in</button>
       </form>
+      <script>
+      document.querySelector('form').addEventListener('submit',function(){
+        document.getElementById('loginBtn').textContent='Signing in…';
+        document.getElementById('loginBtn').disabled=true;
+        document.getElementById('loginSpinner').style.display='block';
+      });
+      </script>
       <p class="hint" style="margin-top:14px">Users: {{range .Users}}<b>{{.ID}}</b> · {{end}}<span class="u-muted">(dev: password = id)</span></p>
     </div>
   </div>
