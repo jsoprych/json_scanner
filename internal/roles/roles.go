@@ -2,13 +2,13 @@ package roles
 
 import (
 	"database/sql"
-	"cetus-marketdata-scanner/internal/dblog"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"time"
 
+	"cetus-marketdata-scanner/internal/dblog"
 	"cetus-marketdata-scanner/internal/iohelp"
 
 	_ "modernc.org/sqlite"
@@ -150,9 +150,15 @@ func (s *Store) Get(id string) (*Role, error) {
 		return nil, err
 	}
 
-	json.Unmarshal([]byte(capsJSON), &role.Capabilities)
-	json.Unmarshal([]byte(limitsJSON), &role.Limits)
-	json.Unmarshal([]byte(permsJSON), &role.DefaultPermissions)
+	if err := json.Unmarshal([]byte(capsJSON), &role.Capabilities); err != nil {
+		role.Capabilities = []string{}
+	}
+	if err := json.Unmarshal([]byte(limitsJSON), &role.Limits); err != nil {
+		role.Limits = Limits{}
+	}
+	if err := json.Unmarshal([]byte(permsJSON), &role.DefaultPermissions); err != nil {
+		role.DefaultPermissions = Permissions{Owner: 7, Group: 0, All: 0}
+	}
 
 	return &role, nil
 }

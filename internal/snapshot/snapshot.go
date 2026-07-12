@@ -136,10 +136,10 @@ func (d *DB) Load(rows []screen.SnapshotRow, ts int64) error {
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
 	ph := strings.TrimSuffix(strings.Repeat("?,", len(columns)), ",")
 	stmt, err := tx.Prepare("INSERT INTO snapshot(" + strings.Join(columns, ",") + ") VALUES(" + ph + ")")
 	if err != nil {
-		tx.Rollback()
 		return err
 	}
 	defer stmt.Close()
@@ -326,10 +326,10 @@ func (d *DB) LoadHistory(rows []screen.SnapshotRow, barTs, snapshotDate int64) e
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
 	ph := strings.TrimSuffix(strings.Repeat("?,", len(columns)), ",")
 	stmt, err := tx.Prepare("INSERT INTO snapshot(" + strings.Join(columns, ",") + ") VALUES(" + ph + ")")
 	if err != nil {
-		tx.Rollback()
 		return err
 	}
 	defer stmt.Close()
