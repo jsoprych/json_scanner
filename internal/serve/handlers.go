@@ -280,12 +280,16 @@ func (s *Server) handleCompile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) applyStudy(u user.User, st study.Study) error {
+	s.log.Info("applyStudy", "key", st.Key, "user", u.ID, "where", st.Where, "visibility", st.Visibility, "tier", st.Tier)
 	st.Key = strings.TrimSpace(st.Key)
 	if st.Key == "" {
+		s.log.Warn("applyStudy: key required")
 		return fmt.Errorf("key required")
 	}
 	existing, exists := s.studies.Get(st.Key)
+	s.log.Info("applyStudy: check existing", "exists", exists, "key", st.Key)
 	if exists && !u.IsAdmin() && existing.Owner != u.ID {
+		s.log.Warn("applyStudy: not owner", "key", st.Key, "owner", existing.Owner, "user", u.ID)
 		return fmt.Errorf("study %q is not yours", st.Key)
 	}
 	if !u.IsAdmin() {
@@ -321,10 +325,17 @@ func (s *Server) applyStudy(u user.User, st study.Study) error {
 	}
 	if strings.TrimSpace(st.Where) != "" {
 		if _, perr := s.preview(study.Study{Where: st.Where, OrderBy: st.OrderBy, Limit: 1}); perr != nil {
+			s.log.Warn("applyStudy: preview failed", "key", st.Key, "error", perr)
 			return fmt.Errorf("invalid WHERE: %w", perr)
 		}
 	}
-	return s.studies.Upsert(st)
+	s.log.Info("applyStudy: upserting", "key", st.Key, "owner", st.Owner)
+	if err := s.studies.Upsert(st); err != nil {
+		s.log.Error("applyStudy: upsert failed", "key", st.Key, "error", err)
+		return err
+	}
+	s.log.Info("applyStudy: success", "key", st.Key)
+	return nil
 }
 
 func (s *Server) handleStudies(w http.ResponseWriter, r *http.Request) {
@@ -337,12 +348,14 @@ func (s *Server) handleStudies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.ParseForm()
+	action := r.FormValue("action")
+	key := strings.TrimSpace(r.FormValue("key"))
+	s.log.Info("study action received", "action", action, "key", key, "user", u.ID, "where", r.FormValue("where"), "title", r.FormValue("title"))
 	back := "/"
 	if u.IsAdmin() {
 		back = "/admin"
 	}
-	key := strings.TrimSpace(r.FormValue("key"))
-	switch r.FormValue("action") {
+	switch action {
 	case "save":
 		st := study.Study{
 			Key: key, Title: r.FormValue("title"), Emoji: r.FormValue("emoji"),
