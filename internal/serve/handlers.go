@@ -400,7 +400,7 @@ func (s *Server) handleStudies(w http.ResponseWriter, r *http.Request) {
 	// AJAX — always return JSON (save/delete return above)
 	if r.Header.Get("X-Requested-With") == "XMLHttpRequest" {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "key": key})
 		return
 	}
 	http.Redirect(w, r, back, http.StatusSeeOther)
