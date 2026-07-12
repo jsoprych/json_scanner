@@ -351,9 +351,9 @@ func (s *Server) handleStudies(w http.ResponseWriter, r *http.Request) {
 	action := r.FormValue("action")
 	key := strings.TrimSpace(r.FormValue("key"))
 	s.log.Info("study action received", "action", action, "key", key, "user", u.ID, "where", r.FormValue("where"), "title", r.FormValue("title"))
-	back := "/"
+	back := "/#mystudies"
 	if u.IsAdmin() {
-		back = "/admin"
+		back = "/admin#studies"
 	}
 	switch action {
 	case "save":

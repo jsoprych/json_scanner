@@ -412,6 +412,8 @@ const appScript = `<script>
     document.querySelectorAll('.tab').forEach(function(x){x.classList.toggle('is-active',x===t);});
     document.querySelectorAll('.pane').forEach(function(p){p.classList.toggle('is-active',p.getAttribute('data-pane')===name);});
   });});
+  // support hash-based tab selection (/index#mystudies)
+  if(location.hash){var h=location.hash.slice(1);var t=document.querySelector('.tab[data-tab="'+h+'"]');if(t)t.click();}
   // theme cycle auto→light→dark
   var order=['','light','dark'],glyph={'':'◐',light:'☀',dark:'☾'};
   function set(t){var r=document.documentElement;if(t){r.setAttribute('data-theme',t);localStorage.setItem('cetus-theme',t);}else{r.removeAttribute('data-theme');localStorage.removeItem('cetus-theme');}var b=document.getElementById('themeBtn');if(b)b.textContent=glyph[t];}
