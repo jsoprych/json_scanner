@@ -318,7 +318,7 @@ func (s *Server) applyStudy(u user.User, st study.Study) error {
 					}
 				}
 				if owned >= q {
-					return fmt.Errorf("study limit reached (%d) on the %s tier — upgrade for more", q, u.Tier)
+					return fmt.Errorf("study limit: %d of %d used (tier: %s)", owned, q, u.Tier)
 				}
 			}
 		}
@@ -376,6 +376,7 @@ func (s *Server) handleStudies(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.log.Info("study saved", "key", st.Key, "by", u.ID)
+		s.throttler.TrackResourceUsage(u.ID, "study")
 		// AJAX request — return JSON success
 		if r.Header.Get("X-Requested-With") == "XMLHttpRequest" {
 			w.Header().Set("Content-Type", "application/json")
