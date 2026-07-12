@@ -39,6 +39,7 @@ func Open(path string, log *slog.Logger) (*DB, error) {
 		return nil, err
 	}
 	rawDB.SetMaxOpenConns(1)
+	rawDB.Exec("PRAGMA foreign_keys = ON")
 	db := dblog.New(rawDB, log)
 	return &DB{db: db}, nil
 }

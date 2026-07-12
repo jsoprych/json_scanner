@@ -177,7 +177,9 @@ func (s *Store) Delete(key string) error {
 	}
 	delete(s.byKey, key)
 	if s.db != nil {
-		s.db.Exec("DELETE FROM studies WHERE key = ?", key)
+		if _, err := s.db.Exec("DELETE FROM studies WHERE key = ?", key); err != nil {
+			return fmt.Errorf("delete study: %w", err)
+		}
 	}
 	out := s.all[:0]
 	for _, st := range s.all {

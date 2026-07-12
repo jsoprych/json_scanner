@@ -410,7 +410,9 @@ func (s *Store) Delete(id string) error {
 	}
 	delete(s.byID, id)
 	if s.db != nil {
-		s.db.Exec("DELETE FROM users WHERE id = ?", id)
+		if _, err := s.db.Exec("DELETE FROM users WHERE id = ?", id); err != nil {
+			return fmt.Errorf("delete user: %w", err)
+		}
 	}
 	out := s.all[:0]
 	for _, u := range s.all {

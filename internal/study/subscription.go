@@ -158,7 +158,9 @@ func (s *SubscriptionStore) Subscribe(userID, studyKey string) error {
 	s.subs[userID][studyKey] = true
 
 	if s.db != nil {
-		s.db.Exec("INSERT OR IGNORE INTO subscriptions (user_id, study_key) VALUES (?, ?)", userID, studyKey)
+		if _, err := s.db.Exec("INSERT OR IGNORE INTO subscriptions (user_id, study_key) VALUES (?, ?)", userID, studyKey); err != nil {
+			return fmt.Errorf("subscribe: %w", err)
+		}
 	}
 	return nil
 }
@@ -176,7 +178,9 @@ func (s *SubscriptionStore) Unsubscribe(userID, studyKey string) error {
 	}
 
 	if s.db != nil {
-		s.db.Exec("DELETE FROM subscriptions WHERE user_id = ? AND study_key = ?", userID, studyKey)
+		if _, err := s.db.Exec("DELETE FROM subscriptions WHERE user_id = ? AND study_key = ?", userID, studyKey); err != nil {
+			return fmt.Errorf("unsubscribe: %w", err)
+		}
 	}
 	return nil
 }
@@ -243,7 +247,9 @@ func (s *SubscriptionStore) DeleteUserSubscriptions(userID string) error {
 	defer s.mu.Unlock()
 	delete(s.subs, userID)
 	if s.db != nil {
-		s.db.Exec("DELETE FROM subscriptions WHERE user_id = ?", userID)
+		if _, err := s.db.Exec("DELETE FROM subscriptions WHERE user_id = ?", userID); err != nil {
+			return fmt.Errorf("delete user subscriptions: %w", err)
+		}
 	}
 	return nil
 }
@@ -259,7 +265,9 @@ func (s *SubscriptionStore) DeleteStudySubscriptions(studyKey string) error {
 		}
 	}
 	if s.db != nil {
-		s.db.Exec("DELETE FROM subscriptions WHERE study_key = ?", studyKey)
+		if _, err := s.db.Exec("DELETE FROM subscriptions WHERE study_key = ?", studyKey); err != nil {
+			return fmt.Errorf("delete study subscriptions: %w", err)
+		}
 	}
 	return nil
 }

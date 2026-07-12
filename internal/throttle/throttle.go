@@ -217,7 +217,7 @@ func (t *Throttler) TrackAPIUsage(userID string) error {
 
 	// Cleanup old rate limits (older than 1 hour)
 	oneHourAgo := timestamp - 3600
-	_, _ = t.db.Exec("DELETE FROM rate_limits WHERE timestamp < ?", oneHourAgo)
+	t.db.Exec("DELETE FROM rate_limits WHERE timestamp < ?", oneHourAgo)
 
 	return nil
 }
