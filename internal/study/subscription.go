@@ -1,7 +1,7 @@
 package study
 
 import (
-	"database/sql"
+	"cetus-marketdata-scanner/internal/dblog"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,7 +20,7 @@ type Subscription struct {
 // SubscriptionStore manages user subscriptions backed by SQLite.
 // JSONL files are for import/export only — NOT synced on writes.
 type SubscriptionStore struct {
-	db   *sql.DB
+	db   *dblog.DB
 	mu   sync.RWMutex
 	subs map[string]map[string]bool
 }
@@ -31,7 +31,7 @@ func OpenSubscriptionStore(path string) (*SubscriptionStore, error) {
 }
 
 // OpenSubscriptionStoreWithDB opens a SQLite-backed subscription store.
-func OpenSubscriptionStoreWithDB(db *sql.DB, jsonlPath string) (*SubscriptionStore, error) {
+func OpenSubscriptionStoreWithDB(db *dblog.DB, jsonlPath string) (*SubscriptionStore, error) {
 	s := &SubscriptionStore{
 		db:   db,
 		subs: make(map[string]map[string]bool),

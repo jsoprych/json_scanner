@@ -3,6 +3,7 @@ package groups
 import (
 	"context"
 	"database/sql"
+	"cetus-marketdata-scanner/internal/dblog"
 	"encoding/json"
 	"io"
 	"cetus-marketdata-scanner/internal/iohelp"
@@ -29,11 +30,11 @@ type Member struct {
 
 // Store manages groups and membership
 type Store struct {
-	db *sql.DB
+	db *dblog.DB
 }
 
 // NewStore creates a new group store
-func NewStore(db *sql.DB) *Store {
+func NewStore(db *dblog.DB) *Store {
 	return &Store{db: db}
 }
 

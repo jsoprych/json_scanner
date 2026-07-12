@@ -2,7 +2,6 @@ package admin
 
 import (
 	"context"
-	"database/sql"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -12,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"cetus-marketdata-scanner/internal/dblog"
 	"cetus-marketdata-scanner/internal/roles"
 	"cetus-marketdata-scanner/internal/throttle"
 	"cetus-marketdata-scanner/internal/user"
@@ -25,7 +25,7 @@ var staticFS embed.FS
 
 // Handler manages the admin panel
 type Handler struct {
-	db        *sql.DB
+	db        *dblog.DB
 	users     *user.Store
 	roles     *roles.Store
 	throttler *throttle.Throttler
@@ -37,7 +37,7 @@ type Handler struct {
 }
 
 // NewHandler creates a new admin handler
-func NewHandler(db *sql.DB, users *user.Store, roles *roles.Store, throttler *throttle.Throttler, log *slog.Logger, validateSession func(cookie string) (userID string, isAdmin bool, valid bool)) (*Handler, error) {
+func NewHandler(db *dblog.DB, users *user.Store, roles *roles.Store, throttler *throttle.Throttler, log *slog.Logger, validateSession func(cookie string) (userID string, isAdmin bool, valid bool)) (*Handler, error) {
 	tmpl, err := template.ParseFS(templatesFS, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)

@@ -2,6 +2,7 @@ package roles
 
 import (
 	"database/sql"
+	"cetus-marketdata-scanner/internal/dblog"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -51,11 +52,11 @@ type Permissions struct {
 
 // Store manages roles in the database
 type Store struct {
-	db *sql.DB
+	db *dblog.DB
 }
 
 // NewStore creates a new role store
-func NewStore(db *sql.DB) *Store {
+func NewStore(db *dblog.DB) *Store {
 	return &Store{db: db}
 }
 

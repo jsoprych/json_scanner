@@ -3,6 +3,7 @@ package results
 import (
 	"context"
 	"database/sql"
+	"cetus-marketdata-scanner/internal/dblog"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -46,11 +47,11 @@ type ACL struct {
 
 // Store manages saved results
 type Store struct {
-	db *sql.DB
+	db *dblog.DB
 }
 
 // NewStore creates a new results store
-func NewStore(db *sql.DB) *Store {
+func NewStore(db *dblog.DB) *Store {
 	return &Store{db: db}
 }
 

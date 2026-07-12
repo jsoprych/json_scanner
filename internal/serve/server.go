@@ -115,21 +115,21 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 		return nil, fmt.Errorf("migrate schema: %w", err)
 	}
 
-	users, err := user.OpenStoreWithDB(snap.RawDB(), cfg.UsersPath)
+	users, err := user.OpenStoreWithDB(snap.LogDB(), cfg.UsersPath)
 	if err != nil {
 		st.Close()
 		snap.Close()
 		return nil, fmt.Errorf("open users: %w", err)
 	}
 
-	studyStore, err := study.OpenStoreWithDB(snap.RawDB(), cfg.StudiesPath)
+	studyStore, err := study.OpenStoreWithDB(snap.LogDB(), cfg.StudiesPath)
 	if err != nil {
 		st.Close()
 		snap.Close()
 		return nil, fmt.Errorf("open studies: %w", err)
 	}
 
-	subStore, err := study.OpenSubscriptionStoreWithDB(snap.RawDB(), cfg.SubscriptionsPath)
+	subStore, err := study.OpenSubscriptionStoreWithDB(snap.LogDB(), cfg.SubscriptionsPath)
 	if err != nil {
 		st.Close()
 		snap.Close()
@@ -180,12 +180,12 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 	catalogBytes, _ := json.Marshal(predicate.BuildCatalog())
 
 	// Initialize groups and results stores
-	groupsStore := groups.NewStore(snap.RawDB())
-	resultsStore := results.NewStore(snap.RawDB())
-	permChecker := permissions.NewChecker(permissions.NewDBAccessChecker(snap.RawDB()))
+	groupsStore := groups.NewStore(snap.LogDB())
+	resultsStore := results.NewStore(snap.LogDB())
+	permChecker := permissions.NewChecker(permissions.NewDBAccessChecker(snap.LogDB()))
 
 	// Initialize roles and throttling
-	rolesStore := roles.NewStore(snap.RawDB())
+	rolesStore := roles.NewStore(snap.LogDB())
 	if err := rolesStore.Init(); err != nil {
 		return nil, fmt.Errorf("init roles: %w", err)
 	}
@@ -198,7 +198,7 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 		return nil, fmt.Errorf("bootstrap users: %w", err)
 	}
 
-	throttler := throttle.NewThrottler(snap.RawDB(), rolesStore)
+	throttler := throttle.NewThrottler(snap.LogDB(), rolesStore)
 	if err := throttler.Init(); err != nil {
 		return nil, fmt.Errorf("init throttler: %w", err)
 	}
@@ -219,7 +219,7 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 		return user.ID, user.IsAdmin(), true
 	}
 	
-	adminHandler, err := admin.NewHandler(snap.RawDB(), users, rolesStore, throttler, log, validateSession)
+	adminHandler, err := admin.NewHandler(snap.LogDB(), users, rolesStore, throttler, log, validateSession)
 	if err != nil {
 		return nil, fmt.Errorf("init admin: %w", err)
 	}

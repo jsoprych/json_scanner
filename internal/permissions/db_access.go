@@ -3,16 +3,17 @@ package permissions
 import (
 	"context"
 	"database/sql"
+	"cetus-marketdata-scanner/internal/dblog"
 	"fmt"
 )
 
 // DBAccessChecker implements AccessChecker using database stores
 type DBAccessChecker struct {
-	db *sql.DB
+	db *dblog.DB
 }
 
 // NewDBAccessChecker creates a new database-backed access checker
-func NewDBAccessChecker(db *sql.DB) *DBAccessChecker {
+func NewDBAccessChecker(db *dblog.DB) *DBAccessChecker {
 	return &DBAccessChecker{db: db}
 }
 

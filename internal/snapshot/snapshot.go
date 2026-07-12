@@ -51,8 +51,11 @@ func OpenTest(path string) (*DB, error) {
 // Close releases the DB.
 func (d *DB) Close() error { return d.db.Close() }
 
-// RawDB returns the underlying *sql.DB for stores that need it.
+// RawDB returns the underlying *sql.DB for migrations and raw access.
 func (d *DB) RawDB() *sql.DB { return d.db.DB() }
+
+// LogDB returns the loggable DB wrapper for stores that need logging.
+func (d *DB) LogDB() *dblog.DB { return d.db }
 
 // SnapshotBatch represents a single snapshot to be batched.
 type SnapshotBatch struct {

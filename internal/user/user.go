@@ -11,7 +11,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
-	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -22,6 +21,7 @@ import (
 	"strings"
 	"sync"
 
+	"cetus-marketdata-scanner/internal/dblog"
 	"cetus-marketdata-scanner/internal/iohelp"
 )
 
@@ -206,7 +206,7 @@ func (r *Registry) All() []User { return r.all }
 // Store is a mutable user registry backed by SQLite.
 // JSONL files are for import/export only — NOT synced on writes.
 type Store struct {
-	db   *sql.DB
+	db   *dblog.DB
 	mu   sync.Mutex
 	all  []User
 	byID map[string]User
@@ -222,7 +222,7 @@ func OpenStore(path string) (*Store, error) {
 }
 
 // OpenStoreWithDB opens a SQLite-backed user store.
-func OpenStoreWithDB(db *sql.DB, jsonlPath string) (*Store, error) {
+func OpenStoreWithDB(db *dblog.DB, jsonlPath string) (*Store, error) {
 	s := &Store{db: db, byID: map[string]User{}}
 
 	// Load from SQLite first
@@ -303,9 +303,9 @@ func (s *Store) loadFromSQL() error {
 	return rows.Err()
 }
 
-func (s *Store) saveToSQL(u User) {
+func (s *Store) saveToSQL(u User) error {
 	if s.db == nil {
-		return
+		return nil
 	}
 	roleID := u.RoleID
 	if roleID == "" {
@@ -318,10 +318,11 @@ func (s *Store) saveToSQL(u User) {
 	if u.Disabled {
 		disabled = 1
 	}
-	s.db.Exec(
+	_, err := s.db.Exec(
 		"INSERT OR REPLACE INTO users (id, name, role_id, pass_hash, disabled) VALUES (?, ?, ?, ?, ?)",
 		u.ID, u.Name, roleID, u.PassHash, disabled,
 	)
+	return err
 }
 
 // All returns a copy of every user.
@@ -357,7 +358,9 @@ func (s *Store) Create(u User) error {
 	}
 	s.all = append(s.all, u)
 	s.byID[u.ID] = u
-	s.saveToSQL(u)
+	if err := s.saveToSQL(u); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -369,7 +372,9 @@ func (s *Store) mutate(id string, fn func(*User)) error {
 		if s.all[i].ID == id {
 			fn(&s.all[i])
 			s.byID[id] = s.all[i]
-			s.saveToSQL(s.all[i])
+			if err := s.saveToSQL(s.all[i]); err != nil {
+				return err
+			}
 			return nil
 		}
 	}

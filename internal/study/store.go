@@ -1,7 +1,7 @@
 package study
 
 import (
-	"database/sql"
+	"cetus-marketdata-scanner/internal/dblog"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,7 +16,7 @@ import (
 // Store is a mutable set of studies backed by SQLite.
 // JSONL files are for import/export only — NOT synced on writes.
 type Store struct {
-	db    *sql.DB
+	db    *dblog.DB
 	mu    sync.Mutex
 	all   []Study
 	byKey map[string]Study
@@ -32,7 +32,7 @@ func OpenStore(path string) (*Store, error) {
 }
 
 // OpenStoreWithDB opens a SQLite-backed study store.
-func OpenStoreWithDB(db *sql.DB, jsonlPath string) (*Store, error) {
+func OpenStoreWithDB(db *dblog.DB, jsonlPath string) (*Store, error) {
 	s := &Store{db: db, byKey: map[string]Study{}}
 
 	if err := s.loadFromSQL(); err != nil {
@@ -45,7 +45,9 @@ func OpenStoreWithDB(db *sql.DB, jsonlPath string) (*Store, error) {
 			return nil, err
 		}
 		for _, st := range s.all {
-			s.saveToSQL(st)
+			if err := s.saveToSQL(st); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return s, nil
@@ -88,9 +90,9 @@ func (s *Store) loadFromSQL() error {
 	return rows.Err()
 }
 
-func (s *Store) saveToSQL(st Study) {
+func (s *Store) saveToSQL(st Study) error {
 	if s.db == nil {
-		return
+		return nil
 	}
 	visibility := string(st.Visibility)
 	if visibility == "" {
@@ -100,10 +102,11 @@ func (s *Store) saveToSQL(st Study) {
 	if tier == "" {
 		tier = "free"
 	}
-	s.db.Exec(
+	_, err := s.db.Exec(
 		"INSERT OR REPLACE INTO studies (key, owner, visibility, group_name, tier, title, emoji, where_clause, order_by, limit_num) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		st.Key, st.Owner, visibility, st.Group, tier, st.Title, st.Emoji, st.Where, st.OrderBy, st.Limit,
 	)
+	return err
 }
 
 // All returns a copy of every study.
@@ -156,7 +159,9 @@ func (s *Store) Upsert(st Study) error {
 		s.all = append(s.all, st)
 	}
 	s.byKey[st.Key] = st
-	s.saveToSQL(st)
+	if err := s.saveToSQL(st); err != nil {
+		return err
+	}
 	return nil
 }
 

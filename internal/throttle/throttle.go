@@ -2,6 +2,7 @@ package throttle
 
 import (
 	"database/sql"
+	"cetus-marketdata-scanner/internal/dblog"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -11,12 +12,12 @@ import (
 
 // Throttler enforces rate limits and quotas
 type Throttler struct {
-	db        *sql.DB
+	db        *dblog.DB
 	roleStore *roles.Store
 }
 
 // NewThrottler creates a new throttler
-func NewThrottler(db *sql.DB, roleStore *roles.Store) *Throttler {
+func NewThrottler(db *dblog.DB, roleStore *roles.Store) *Throttler {
 	return &Throttler{
 		db:        db,
 		roleStore: roleStore,
