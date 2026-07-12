@@ -443,7 +443,22 @@ _g('studyForm').addEventListener('submit',function(ev){
 function testStudy(){var b=new URLSearchParams({where:_g('s_where').value,order_by:(_g('s_order')||{}).value||'',limit:(_g('s_limit')||{}).value||'20'});
   _g('s_result').textContent='testing…';
   fetch('/studies/test',{method:'POST',body:b}).then(function(r){return r.json();}).then(function(d){
-    _g('s_result').textContent=d.error?('✗ '+d.error):('✓ '+d.count+' match: '+((d.sample||[]).join(', ')||'—'));
+    _g('s_result').textContent=d.error?('✗ '+d.error):('✓ '+d.count+' matches');
+    // Fetch full results and display
+    if(!d.error&&d.count>0){
+      fetch('/api/v1/scan?'+b.toString()).then(function(r){return r.json();}).then(function(matches){
+        showResults(matches.matches||[]);
+      });
+    }
   }).catch(function(e){_g('s_result').textContent='✗ '+e;});}
+function showResults(matches){
+  var pane=document.querySelector('[data-pane="mystudies"]');
+  var old=document.getElementById('resultsTable');
+  if(old)old.remove();
+  if(!matches.length)return;
+  var t='<div id="resultsTable" style="margin-top:12px"><table class="table"><thead><tr><th>Symbol</th><th>Close</th><th>RSI14</th><th>Ret 3m</th><th>$Vol</th></tr></thead><tbody>';
+  matches.forEach(function(m){t+='<tr><td class="sym">'+m.symbol+'</td><td>'+m.close.toFixed(2)+'</td><td>'+m.rsi14.toFixed(1)+'</td><td>'+(m.ret_3m*100).toFixed(1)+'%</td><td>$'+(m.dollar_vol/1e6).toFixed(1)+'M</td></tr>';});
+  t+='</tbody></table></div>';
+  pane.insertAdjacentHTML('beforeend',t);}
 if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
 </script>`
