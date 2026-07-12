@@ -394,11 +394,16 @@ func (s *Server) handleStudies(w http.ResponseWriter, r *http.Request) {
 		} else {
 			s.log.Info("study deleted", "key", key, "by", u.ID)
 		}
+	default:
+		s.log.Warn("unknown study action", "action", action, "key", key)
 	}
-	// AJAX requests return above — only non-AJAX gets here for redirect
-	if r.Header.Get("X-Requested-With") == "" {
-		http.Redirect(w, r, back, http.StatusSeeOther)
+	// AJAX — always return JSON (save/delete return above)
+	if r.Header.Get("X-Requested-With") == "XMLHttpRequest" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		return
 	}
+	http.Redirect(w, r, back, http.StatusSeeOther)
 }
 
 func (s *Server) handleStudiesExport(w http.ResponseWriter, r *http.Request) {
