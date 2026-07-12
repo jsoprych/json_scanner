@@ -364,11 +364,24 @@ func (s *Server) handleStudies(w http.ResponseWriter, r *http.Request) {
 			Where: r.FormValue("where"), OrderBy: r.FormValue("order_by"), Limit: atoiOr(r.FormValue("limit"), 0),
 		}
 		if err := s.applyStudy(u, st); err != nil {
+			// AJAX request — return JSON error
+			if r.Header.Get("X-Requested-With") == "XMLHttpRequest" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
 			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprintf(w, "cannot save study: %v", err)
 			return
 		}
 		s.log.Info("study saved", "key", st.Key, "by", u.ID)
+		// AJAX request — return JSON success
+		if r.Header.Get("X-Requested-With") == "XMLHttpRequest" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"status": "ok", "key": st.Key})
+			return
+		}
 	case "delete":
 		existing, exists := s.studies.Get(key)
 		if exists && !u.IsAdmin() && existing.Owner != u.ID {
@@ -382,7 +395,10 @@ func (s *Server) handleStudies(w http.ResponseWriter, r *http.Request) {
 			s.log.Info("study deleted", "key", key, "by", u.ID)
 		}
 	}
-	http.Redirect(w, r, back, http.StatusSeeOther)
+	// AJAX requests return above — only non-AJAX gets here for redirect
+	if r.Header.Get("X-Requested-With") == "" {
+		http.Redirect(w, r, back, http.StatusSeeOther)
+	}
 }
 
 func (s *Server) handleStudiesExport(w http.ResponseWriter, r *http.Request) {

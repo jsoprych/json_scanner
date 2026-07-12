@@ -427,6 +427,19 @@ function editStudy(k){var s=(window.STUDYDATA||[]).find(function(x){return x.key
   var r=_g('s_result');if(r)r.textContent='editing '+s.key;_g('studyForm').scrollIntoView();}
 function clearStudy(){_g('studyForm').reset();var r=_g('s_result');if(r)r.textContent='';}
 function cloneStudy(k){editStudy(k);var e=_g('s_key');if(e)e.value=(e.value||k)+'-copy';var r=_g('s_result');if(r)r.textContent='cloned '+k+' — change the key & Save';}
+// AJAX save — no page reload
+_g('studyForm').addEventListener('submit',function(ev){
+  ev.preventDefault();
+  var r=_g('s_result');if(r)r.textContent='saving…';
+  var fd=new FormData(ev.target);
+  fetch('/studies',{method:'POST',body:fd,headers:{'X-Requested-With':'XMLHttpRequest'}}).then(function(resp){
+    return resp.json();
+  }).then(function(d){
+    if(d.error){if(r)r.textContent='✗ '+d.error;return}
+    if(r)r.textContent='✓ saved '+d.key;
+    window.location.reload(); // refresh to show updated study list
+  }).catch(function(e){if(r)r.textContent='✗ '+e;});
+});
 function testStudy(){var b=new URLSearchParams({where:_g('s_where').value,order_by:(_g('s_order')||{}).value||'',limit:(_g('s_limit')||{}).value||'20'});
   _g('s_result').textContent='testing…';
   fetch('/studies/test',{method:'POST',body:b}).then(function(r){return r.json();}).then(function(d){
