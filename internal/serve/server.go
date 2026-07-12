@@ -246,6 +246,15 @@ func (s *Server) Run() {
 	mux := newSafeMux()
 	s.registerRoutes(mux)
 
+	// Run initial scan in background so first login doesn't wait 12-15s
+	go func() {
+		s.mu.Lock()
+		if err := s.refresh(); err != nil {
+			s.log.Error("initial scan failed", "error", err)
+		}
+		s.mu.Unlock()
+	}()
+
 	ln, err := net.Listen("tcp", s.cfg.ServeAddr)
 	if err != nil {
 		s.log.Error("cannot bind dashboard address (port already in use?)", "addr", s.cfg.ServeAddr, "error", err)
