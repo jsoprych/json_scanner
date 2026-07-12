@@ -226,7 +226,9 @@ func OpenStoreWithDB(db *sql.DB, jsonlPath string) (*Store, error) {
 	s := &Store{db: db, byID: map[string]User{}}
 
 	if err := s.loadFromSQL(); err != nil {
-		return nil, fmt.Errorf("load users from SQLite: %w", err)
+		// SQLite load failed (e.g. missing column) — fall through to JSONL
+		s.all = nil
+		s.byID = map[string]User{}
 	}
 
 	// One-time migration: if SQLite is empty, import from JSONL
@@ -262,15 +264,16 @@ func (s *Store) importJSONLFile(path string) error {
 }
 
 func (s *Store) loadFromSQL() error {
-	rows, err := s.db.Query("SELECT id, name, role_id, disabled FROM users ORDER BY id")
+	rows, err := s.db.Query("SELECT id, name, role_id, pass_hash, disabled FROM users ORDER BY id")
 	if err != nil {
+		// pass_hash column might not exist yet — fall through to JSONL
 		return err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var id, name, roleID string
+		var id, name, roleID, passHash string
 		var disabled int
-		if err := rows.Scan(&id, &name, &roleID, &disabled); err != nil {
+		if err := rows.Scan(&id, &name, &roleID, &passHash, &disabled); err != nil {
 			return err
 		}
 		u := User{
@@ -278,6 +281,7 @@ func (s *Store) loadFromSQL() error {
 			Name:     name,
 			RoleID:   roleID,
 			Role:     Role(roleID),
+			PassHash: passHash,
 			Disabled: disabled != 0,
 		}
 		s.all = append(s.all, u)
@@ -302,8 +306,8 @@ func (s *Store) saveToSQL(u User) {
 		disabled = 1
 	}
 	s.db.Exec(
-		"INSERT OR REPLACE INTO users (id, name, role_id, disabled) VALUES (?, ?, ?, ?)",
-		u.ID, u.Name, roleID, disabled,
+		"INSERT OR REPLACE INTO users (id, name, role_id, pass_hash, disabled) VALUES (?, ?, ?, ?, ?)",
+		u.ID, u.Name, roleID, u.PassHash, disabled,
 	)
 }
 

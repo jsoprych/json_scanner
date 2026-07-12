@@ -14,10 +14,12 @@ const (
 	Version2 = 2
 	// Version 3: Roles and throttling
 	Version3 = 3
+	// Version 4: pass_hash column on users
+	Version4 = 4
 )
 
 // CurrentVersion is the latest schema version
-const CurrentVersion = Version3
+const CurrentVersion = Version4
 
 // Migrate runs all pending migrations
 func Migrate(db *sql.DB) error {
@@ -49,6 +51,12 @@ func Migrate(db *sql.DB) error {
 	if currentVersion < Version3 {
 		if err := migrateToV3(db); err != nil {
 			return fmt.Errorf("migrate to v3: %w", err)
+		}
+	}
+
+	if currentVersion < Version4 {
+		if err := migrateToV4(db); err != nil {
+			return fmt.Errorf("migrate to v4: %w", err)
 		}
 	}
 
@@ -185,6 +193,7 @@ func migrateToV3(db *sql.DB) error {
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL DEFAULT '',
 			role_id TEXT NOT NULL DEFAULT 'user',
+			pass_hash TEXT NOT NULL DEFAULT '',
 			disabled INTEGER NOT NULL DEFAULT 0
 		)
 	`)
@@ -248,7 +257,6 @@ func migrateToV3(db *sql.DB) error {
 		ALTER TABLE users ADD COLUMN role_id TEXT REFERENCES roles(id)
 	`)
 	if err != nil {
-		// Column might already exist, ignore error
 		if !isColumnExistsError(err) {
 			return fmt.Errorf("add role_id to users: %w", err)
 		}
@@ -309,6 +317,32 @@ func migrateToV3(db *sql.DB) error {
 		INSERT INTO schema_version (version, applied_at) 
 		VALUES (?, strftime('%s', 'now'))
 	`, Version3)
+	if err != nil {
+		return fmt.Errorf("record migration: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// migrateToV4 adds pass_hash column to users for password persistence.
+func migrateToV4(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(`ALTER TABLE users ADD COLUMN pass_hash TEXT NOT NULL DEFAULT ''`)
+	if err != nil {
+		if !isColumnExistsError(err) {
+			return fmt.Errorf("add pass_hash to users: %w", err)
+		}
+	}
+
+	_, err = tx.Exec(`
+		INSERT INTO schema_version (version, applied_at) 
+		VALUES (?, strftime('%s', 'now'))
+	`, Version4)
 	if err != nil {
 		return fmt.Errorf("record migration: %w", err)
 	}
