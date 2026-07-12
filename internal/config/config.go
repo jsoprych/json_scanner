@@ -73,6 +73,13 @@ type Config struct {
 	// AnomalyFormat is the `anomalies` output: text (default) | jsonl.
 	AnomalyFormat string
 
+	// --- TLS / HTTPS ---
+
+	// TLSDomain enables Let's Encrypt auto-HTTPS when set (e.g., "scan.chartgeometry.com").
+	TLSDomain string
+	// TLSCacheDir is where TLS certificates are cached (default: "certs").
+	TLSCacheDir string
+
 	// --- the scanner's OWN store (separate from the read-only cetus warehouse) ---
 
 	// StoreDB is the scanner's own SQLite DB — it materializes the snapshot here and
@@ -188,6 +195,10 @@ func Load() Config {
 		JWTSignTTLHours:   envInt("SCANNER_JWT_SIGN_TTL_HOURS", 24),
 
 		AnomalyFormat: envOr("SCANNER_ANOMALY_FORMAT", "text"),
+
+		// TLS
+		TLSDomain:   envOr("SCANNER_TLS_DOMAIN", ""),
+		TLSCacheDir: envOr("SCANNER_TLS_CACHE_DIR", "certs"),
 
 		// Own store defaults to persistent path at DATA/SCANNER/scanner.db,
 		// resolved relative to the executable. Set SCANNER_STORE_DB to override,
