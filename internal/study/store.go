@@ -35,18 +35,21 @@ func OpenStore(path string) (*Store, error) {
 func OpenStoreWithDB(db *dblog.DB, jsonlPath string) (*Store, error) {
 	s := &Store{db: db, byKey: map[string]Study{}}
 
-	if err := s.loadFromSQL(); err != nil {
-		return nil, fmt.Errorf("load studies from SQLite: %w", err)
-	}
+	// Load from SQLite first (may fail if table missing on old DBs)
+	sqlOK := s.loadFromSQL() == nil
 
-	// One-time migration: if SQLite is empty, import from JSONL
-	if len(s.all) == 0 && jsonlPath != "" {
-		if err := s.importJSONLFile(jsonlPath); err != nil {
-			return nil, err
-		}
-		for _, st := range s.all {
-			if err := s.saveToSQL(st); err != nil {
+	// If SQLite load failed or empty, reload from JSONL and seed
+	if !sqlOK || len(s.all) == 0 {
+		if jsonlPath != "" {
+			s.all = nil
+			s.byKey = map[string]Study{}
+			if err := s.importJSONLFile(jsonlPath); err != nil {
 				return nil, err
+			}
+			for _, st := range s.all {
+				if err := s.saveToSQL(st); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
