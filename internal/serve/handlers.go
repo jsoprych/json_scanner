@@ -65,6 +65,7 @@ func (s *Server) registerRoutes(mux *safeMux) {
 
 	mux.HandleFunc("/login", s.handleLogin)
 	mux.HandleFunc("/logout", s.handleLogout)
+	mux.HandleFunc("/signup", s.handleSignup)
 	mux.HandleFunc("/profile", s.handleProfile)
 	mux.HandleFunc("/studies/test", s.handleStudiesTest)
 	mux.HandleFunc("/api/scanner/catalog", s.handleCatalog)
@@ -534,4 +535,58 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprintf(w, profileHTML, u.ID, errorMsg, successMsg)
+}
+
+func (s *Server) handleSignup(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.OpenSignup {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, `<!doctype html><p style="font:16px system-ui;padding:40px">Signup is disabled.</p>`)
+		return
+	}
+	errorMsg := ""
+	if r.Method == http.MethodPost {
+		userID := strings.TrimSpace(r.FormValue("user"))
+		pw := r.FormValue("password")
+		confirm := r.FormValue("confirm")
+		switch {
+		case len(userID) < 3 || len(userID) > 32:
+			errorMsg = "Username: 3-32 characters"
+		case !validUsername(userID):
+			errorMsg = "Username: letters, numbers, underscores only"
+		case pw != confirm:
+			errorMsg = "Passwords do not match"
+		default:
+			if err := auth.ValidatePassword(pw, auth.DefaultPolicy()); err != nil {
+				errorMsg = err.Error()
+			} else if _, exists := s.users.Find(userID); exists {
+				errorMsg = "Username already taken"
+			} else {
+				u := user.User{ID: userID, Name: userID, Role: user.RoleUser, RoleID: "user"}
+				u.PassHash = auth.HashPassword(pw)
+				if err := s.users.Create(u); err != nil {
+					errorMsg = "Server error: " + err.Error()
+				} else {
+					tok := s.sessions.create(u.ID, s.sessTTL)
+					http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: tok, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: int(s.sessTTL.Seconds())})
+					http.Redirect(w, r, "/", http.StatusSeeOther)
+					return
+				}
+			}
+		}
+	}
+	var errDiv string
+	if errorMsg != "" {
+		errDiv = fmt.Sprintf(`<div class="err">%s</div>`, errorMsg)
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, signupHTML, errDiv)
+}
+
+func validUsername(s string) bool {
+	for _, r := range s {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_') {
+			return false
+		}
+	}
+	return true
 }

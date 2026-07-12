@@ -80,6 +80,9 @@ type Config struct {
 	// TLSCacheDir is where TLS certificates are cached (default: "certs").
 	TLSCacheDir string
 
+	// OpenSignup enables self-registration (default false).
+	OpenSignup bool
+
 	// --- the scanner's OWN store (separate from the read-only cetus warehouse) ---
 
 	// StoreDB is the scanner's own SQLite DB — it materializes the snapshot here and
@@ -199,6 +202,7 @@ func Load() Config {
 		// TLS
 		TLSDomain:   envOr("SCANNER_TLS_DOMAIN", ""),
 		TLSCacheDir: envOr("SCANNER_TLS_CACHE_DIR", "certs"),
+		OpenSignup:  envOr("SCANNER_OPEN_SIGNUP", "") == "true",
 
 		// Own store defaults to persistent path at DATA/SCANNER/scanner.db,
 		// resolved relative to the executable. Set SCANNER_STORE_DB to override,
