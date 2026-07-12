@@ -10,6 +10,7 @@ import (
 
 	"cetus-marketdata-scanner/internal/alert"
 	"cetus-marketdata-scanner/internal/api"
+	"cetus-marketdata-scanner/internal/auth"
 	"cetus-marketdata-scanner/internal/backtest"
 	"cetus-marketdata-scanner/internal/dashboard"
 	"cetus-marketdata-scanner/internal/predicate"
@@ -64,6 +65,7 @@ func (s *Server) registerRoutes(mux *safeMux) {
 
 	mux.HandleFunc("/login", s.handleLogin)
 	mux.HandleFunc("/logout", s.handleLogout)
+	mux.HandleFunc("/profile", s.handleProfile)
 	mux.HandleFunc("/studies/test", s.handleStudiesTest)
 	mux.HandleFunc("/api/scanner/catalog", s.handleCatalog)
 	mux.HandleFunc("/api/studies/compile", s.handleCompile)
@@ -501,4 +503,35 @@ func (s *Server) handleStudiesImport(w http.ResponseWriter, r *http.Request) {
 		back = "/admin"
 	}
 	http.Redirect(w, r, back, http.StatusSeeOther)
+}
+
+// handleProfile shows change password form.
+func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
+	u, ok := s.requireUser(w, r)
+	if !ok { return }
+
+	errorMsg, successMsg := "", ""
+	if r.Method == http.MethodPost {
+		current := r.FormValue("current_password")
+		newPw := r.FormValue("new_password")
+		confirm := r.FormValue("confirm_password")
+		switch {
+		case !u.CheckPassword(current):
+			errorMsg = "Current password is incorrect"
+		case newPw != confirm:
+			errorMsg = "Passwords do not match"
+		case current == newPw:
+			errorMsg = "Must differ from current"
+		default:
+			if perr := auth.ValidatePassword(newPw, auth.DefaultPolicy()); perr != nil {
+				errorMsg = perr.Error()
+			} else if serr := s.users.SetPassword(u.ID, newPw); serr != nil {
+				errorMsg = "Update failed"
+			} else {
+				successMsg = "Password changed"
+			}
+		}
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, profileHTML, u.ID, errorMsg, successMsg)
 }

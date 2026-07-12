@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"cetus-marketdata-scanner/internal/alert"
+	"cetus-marketdata-scanner/internal/auth"
 	"cetus-marketdata-scanner/internal/authjwt"
 	"cetus-marketdata-scanner/internal/backtest"
 	"cetus-marketdata-scanner/internal/groups"
@@ -85,6 +87,27 @@ func NewHandlerFull(
 		validateSession: validateSession,
 		log:             log,
 		start:           time.Now(),
+	}
+}
+
+// handleChangePassword changes the authenticated user's password.
+func (h *Handler) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	if h.users == nil {
+		writeError(w, http.StatusServiceUnavailable, "NO_USERS", "user store not configured")
+		return
+	}
+	auth.HandleChangePassword(h.users, auth.DefaultPolicy())(w, r)
+}
+
+// withUserContext wraps a handler by resolving auth and putting the user in context.
+func (h *Handler) withUserContext(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		u, ok := h.requireAuth(w, r)
+		if !ok {
+			return
+		}
+		r = r.WithContext(context.WithValue(r.Context(), "user", u))
+		next(w, r)
 	}
 }
 

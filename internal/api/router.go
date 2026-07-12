@@ -82,6 +82,7 @@ func (h *Handler) Router() http.Handler {
 	// Auth endpoints
 	mux.HandleFunc("POST /api/v1/auth/login", h.Login)
 	mux.HandleFunc("GET /api/v1/auth/me", h.Me)
+	mux.HandleFunc("PUT /api/v1/auth/password", h.withUserContext(h.handleChangePassword))
 
 	// User management (admin)
 	mux.HandleFunc("GET /api/v1/users", h.ListUsers)
