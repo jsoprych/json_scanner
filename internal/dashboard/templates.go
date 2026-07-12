@@ -238,8 +238,9 @@ const indexSrc = `{{define "index"}}<!doctype html><html lang="en"><head>` + hea
             <td><button class="mini" type="button" onclick="editStudy('{{.Key}}')">edit</button><button class="mini" type="button" onclick="cloneStudy('{{.Key}}')">clone</button>
               <form method="post" action="/studies" class="inline"><input type="hidden" name="action" value="delete"><input type="hidden" name="key" value="{{.Key}}"><button class="mini mini--danger" onclick="return confirm('Delete {{.Key}}?')">del</button></form></td>
           </tr>{{end}}</tbody>
-        </table>{{else}}<div class="empty">— no studies yet — create one below —</div>{{end}}
+         </table>{{else}}<div class="empty">— no studies yet — create one below —</div>{{end}}
         <form method="post" action="/studies" id="studyForm" class="study-form">
+          <input type="hidden" name="action" value="save">
           <div class="field"><label>Key</label><input class="input" name="key" id="s_key" placeholder="unique-key" required></div>
           <div class="field"><label>Title</label><input class="input" name="title" id="s_title" placeholder="My Breakout"></div>
           <div class="field"><label>Emoji</label><input class="input" name="emoji" id="s_emoji" placeholder="🔥"></div>
@@ -351,6 +352,7 @@ const adminSrc = `{{define "admin"}}<!doctype html><html lang="en"><head>` + hea
           </tr>{{end}}</tbody>
         </table>
         <form method="post" action="/studies" id="studyForm" class="study-form">
+          <input type="hidden" name="action" value="save">
           <div class="field"><label>Key</label><input class="input" name="key" id="s_key" placeholder="unique-key" required></div>
           <div class="field"><label>Title</label><input class="input" name="title" id="s_title"></div>
           <div class="field"><label>Emoji</label><input class="input" name="emoji" id="s_emoji"></div>
