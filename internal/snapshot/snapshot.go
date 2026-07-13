@@ -128,15 +128,15 @@ var columns = []string{
 	"cmf20", "ultimate_osc",
 }
 
-// Load (re)creates the snapshot table and inserts rows. NaN → NULL so SQL
-// comparisons behave: an under-warmed feature is NULL and simply never matches.
-// This is the legacy single-snapshot mode; use LoadHistory for date-stamped snapshots.
+// Load clears the snapshot table for this timestamp and inserts fresh rows.
+// NaN → NULL so SQL comparisons behave: an under-warmed feature is NULL.
+// Uses DELETE (not DROP) so historical data from backfill is preserved.
 func (d *DB) Load(rows []screen.SnapshotRow, ts int64) error {
-	if _, err := d.db.Exec(`DROP TABLE IF EXISTS snapshot`); err != nil {
-		return fmt.Errorf("drop snapshot: %w", err)
-	}
 	if err := d.ensureTable(); err != nil {
 		return err
+	}
+	if _, err := d.db.Exec("DELETE FROM snapshot WHERE snapshot_date = ?", ts); err != nil {
+		return fmt.Errorf("clear snapshot date: %w", err)
 	}
 
 	tx, err := d.db.Begin()
