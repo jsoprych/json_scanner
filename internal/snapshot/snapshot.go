@@ -532,6 +532,22 @@ func (d *DB) Run(s study.Study) ([]Match, error) {
 	if where == "" {
 		where = "1=1"
 	}
+
+	// Validate SQL against real schema — catches injection, unknown columns,
+	// and syntax errors for free (LIMIT 0 reads zero rows).
+	test := "SELECT 1 FROM snapshot WHERE snapshot_date = ? AND (" + where + ")"
+	if s.OrderBy != "" {
+		test += " ORDER BY " + s.OrderBy
+	}
+	if s.Limit > 0 {
+		test += fmt.Sprintf(" LIMIT %d", s.Limit)
+	} else {
+		test += " LIMIT 0"
+	}
+	if _, err := d.db.Exec("EXPLAIN "+test, d.activeDate); err != nil {
+		return nil, fmt.Errorf("study %q: invalid SQL: %w", s.Key, err)
+	}
+
 	q := "SELECT symbol, close, rsi14, ret_3m, dollar_vol FROM snapshot WHERE snapshot_date = ? AND (" + where + ")"
 	if s.OrderBy != "" {
 		q += " ORDER BY " + s.OrderBy
