@@ -115,7 +115,7 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 	}
 
 	// Run schema migrations (creates users, roles, groups, etc.)
-	if err := schema.Migrate(snap.RawDB()); err != nil {
+	if err := schema.Migrate(snap.LogDB()); err != nil {
 		st.Close()
 		snap.Close()
 		return nil, fmt.Errorf("migrate schema: %w", err)
@@ -200,7 +200,7 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 	}
 
 	// Bootstrap default admin user if no users exist
-	if err := bootstrap.Bootstrap(snap.RawDB(), users, rolesStore, log); err != nil {
+	if err := bootstrap.Bootstrap(snap.LogDB(), users, rolesStore, log); err != nil {
 		return nil, fmt.Errorf("bootstrap users: %w", err)
 	}
 
@@ -230,7 +230,7 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 		return nil, fmt.Errorf("init admin: %w", err)
 	}
 
-	loginGuard, err := auth.NewLoginGuard(snap.RawDB(), cfg.LoginMaxFailures, cfg.LoginLockoutSecs)
+	loginGuard, err := auth.NewLoginGuard(snap.LogDB(), cfg.LoginMaxFailures, cfg.LoginLockoutSecs)
 	if err != nil {
 		return nil, fmt.Errorf("init login guard: %w", err)
 	}

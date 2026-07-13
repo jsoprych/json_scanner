@@ -1,8 +1,9 @@
 package schema
 
 import (
-	"database/sql"
 	"fmt"
+
+	"cetus-marketdata-scanner/internal/dblog"
 )
 
 // Migration scripts for scanner.db schema evolution
@@ -24,7 +25,7 @@ const (
 const CurrentVersion = Version6
 
 // Migrate runs all pending migrations
-func Migrate(db *sql.DB) error {
+func Migrate(db *dblog.DB) error {
 	// Create schema_version table if not exists
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS schema_version (
@@ -76,7 +77,7 @@ func Migrate(db *sql.DB) error {
 }
 
 // migrateToV2 adds groups, permissions, and saved results
-func migrateToV2(db *sql.DB) error {
+func migrateToV2(db *dblog.DB) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -192,7 +193,7 @@ func migrateToV2(db *sql.DB) error {
 }
 
 // migrateToV3 adds roles, users table, and throttling tables
-func migrateToV3(db *sql.DB) error {
+func migrateToV3(db *dblog.DB) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -337,7 +338,7 @@ func migrateToV3(db *sql.DB) error {
 }
 
 // migrateToV4 adds pass_hash column to users for password persistence.
-func migrateToV4(db *sql.DB) error {
+func migrateToV4(db *dblog.DB) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -384,7 +385,7 @@ func findSubstring(s, substr string) bool {
 }
 
 // GetVersion returns the current schema version
-func GetVersion(db *sql.DB) (int, error) {
+func GetVersion(db *dblog.DB) (int, error) {
 	var version int
 	err := db.QueryRow(`
 		SELECT COALESCE(MAX(version), 0) 
@@ -397,7 +398,7 @@ func GetVersion(db *sql.DB) (int, error) {
 }
 
 // migrateToV6 adds NLP per-user configuration columns.
-func migrateToV6(db *sql.DB) error {
+func migrateToV6(db *dblog.DB) error {
 	tx, err := db.Begin()
 	if err != nil { return err }
 	defer tx.Rollback()

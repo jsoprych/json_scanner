@@ -119,7 +119,7 @@ func (h *Handler) TranslateStudy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Final gate: validate SQL against real SQLite schema (LIMIT 0 — free)
-	if err := nlp.ValidateSQL(h.snap.RawDB(), result.Where, result.OrderBy); err != nil {
+	if err := nlp.ValidateSQL(h.snap.LogDB(), result.Where, result.OrderBy); err != nil {
 		nlperr(w, "SQL_INVALID",
 			fmt.Sprintf("The generated SQL is invalid: %s", err.Error()),
 			"The AI produced SQL that doesn't match the database schema. Try rephrasing your query.")

@@ -2,9 +2,12 @@ package auth
 
 import (
 	"database/sql"
+	"log/slog"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"cetus-marketdata-scanner/internal/dblog"
 
 	_ "modernc.org/sqlite"
 )
@@ -176,13 +179,13 @@ func TestSessionStoreClearCookie(t *testing.T) {
 
 // --- Login Guard ---
 
-func testGuardDB(t *testing.T) *sql.DB {
+func testGuardDB(t *testing.T) *dblog.DB {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return db
+	return dblog.New(db, slog.Default())
 }
 
 func TestLoginGuard(t *testing.T) {

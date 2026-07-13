@@ -4,17 +4,19 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"cetus-marketdata-scanner/internal/dblog"
 )
 
 // LoginGuard tracks per-account failed login attempts and lockout.
 type LoginGuard struct {
-	db          *sql.DB
+	db          *dblog.DB
 	maxFailures int
 	lockoutSecs int
 }
 
 // NewLoginGuard creates a login guard. Call once at startup.
-func NewLoginGuard(db *sql.DB, maxFailures, lockoutSecs int) (*LoginGuard, error) {
+func NewLoginGuard(db *dblog.DB, maxFailures, lockoutSecs int) (*LoginGuard, error) {
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS login_audit (
 		user_id TEXT PRIMARY KEY,
 		failures INTEGER NOT NULL DEFAULT 0,

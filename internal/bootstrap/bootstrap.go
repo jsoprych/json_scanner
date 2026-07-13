@@ -1,16 +1,16 @@
 package bootstrap
 
 import (
-	"database/sql"
 	"fmt"
 	"log/slog"
 
+	"cetus-marketdata-scanner/internal/dblog"
 	"cetus-marketdata-scanner/internal/roles"
 	"cetus-marketdata-scanner/internal/user"
 )
 
 // Bootstrap creates default admin user if no users exist
-func Bootstrap(db *sql.DB, users *user.Store, rolesStore *roles.Store, log *slog.Logger) error {
+func Bootstrap(db *dblog.DB, users *user.Store, rolesStore *roles.Store, log *slog.Logger) error {
 	// Check if any users exist
 	allUsers := users.All()
 	if len(allUsers) > 0 {

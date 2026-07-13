@@ -4,13 +4,14 @@ package nlp
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	"cetus-marketdata-scanner/internal/dblog"
 )
 
 // Config holds LLM connection settings.
@@ -254,7 +255,7 @@ func validateClause(clause string) error {
 // ValidateSQL tests whether a WHERE clause compiles against the snapshot schema.
 // Uses LIMIT 0 — SQLite parses and plans the query but reads zero rows.
 // Returns nil if the SQL is valid, or the SQLite error if not.
-func ValidateSQL(db *sql.DB, where, orderBy string) error {
+func ValidateSQL(db *dblog.DB, where, orderBy string) error {
 	if db == nil {
 		return nil
 	}
