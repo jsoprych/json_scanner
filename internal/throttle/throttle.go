@@ -275,7 +275,19 @@ func (t *Throttler) GetEffectiveLimits(userID string) (*roles.Limits, error) {
 		return nil, fmt.Errorf("get role: %w", err)
 	}
 	if role == nil {
-		return nil, fmt.Errorf("role not found: %s", roleID)
+		// Fall back to generous defaults — no user should break on role lookup failure
+		return &roles.Limits{
+			APICallsPerMinute:  60,
+			APICallsPerHour:    1000,
+			APICallsPerDay:     10000,
+			MaxStudies:         3,
+			MaxSavedResults:    100,
+			MaxGroups:          5,
+			MaxGroupMembers:    20,
+			ReplayDays:         7,
+			MaxSymbolsPerScan:  1000,
+			ExportMaxResults:   500,
+		}, nil
 	}
 
 	return &role.Limits, nil

@@ -420,6 +420,10 @@ const studyioSrc = `{{define "studyio"}}<div class="io-row">
 
 // appScript — tab switching, theme cycling (persisted), study editor, PWA SW.
 const appScript = `<script>
+/* Shared API client — same as /admin/static/js/api.js */
+const API={baseUrl:'/api/v1',
+request(m,p,d){var o={method:m,headers:{'Content-Type':'application/json'},credentials:'same-origin'};if(d&&(m==='POST'||m==='PUT'||m==='PATCH'))o.body=JSON.stringify(d);return fetch(this.baseUrl+p,o).then(function(r){if(r.status===401){window.location.href='/login';return}if(!r.ok)return r.json().then(function(e){throw new Error(e.error||'Request failed')});if(r.status===204)return null;return r.json()});},
+get(p){return this.request('GET',p);},post(p,d){return this.request('POST',p,d);},put(p,d){return this.request('PUT',p,d);},del(p){return this.request('DELETE',p);}};
 (function(){
   // tabs
   document.querySelectorAll('.tab').forEach(function(t){t.addEventListener('click',function(){
@@ -462,13 +466,13 @@ function testStudy(){var b=new URLSearchParams({where:_g('s_where').value,order_
     _g('s_result').textContent=d.error?('✗ '+d.error):('✓ '+d.count+' matches');
     // Fetch full results and display
     if(!d.error&&d.count>0){
-      fetch('/api/v1/scan?'+b.toString()).then(function(r){return r.json();}).then(function(matches){
+      API.get('/scan?'+b.toString()).then(function(matches){
         showResults(matches.matches||[]);
       });
     }
   }).catch(function(e){_g('s_result').textContent='✗ '+e;});}
 function nlpTranslate(){var q=_g('nlp_query').value;if(!q)return;_g('nlp_result').textContent='translating…';
-  fetch('/api/v1/nlp/translate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})}).then(function(r){return r.json();}).then(function(d){
+  API.post('/nlp/translate',{query:q}).then(function(d){
     if(d.error){_g('nlp_result').textContent='✗ '+d.error;return}
     _g('s_where').value=d.where;_g('s_order').value=d.order_by||'';_g('s_limit').value=d.limit||'';
     _g('nlp_result').textContent='✓ '+d.where.substring(0,60)+(d.where.length>60?'…':'');
