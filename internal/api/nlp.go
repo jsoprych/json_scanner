@@ -24,7 +24,7 @@ type TranslateStudyResponse struct {
 const nlpDailyCap = 1000
 
 // TranslateStudy converts natural language to a study via LLM.
-// Hard-capped at 1000/day system-wide.
+// Enforces per-user NLP enabled check and daily limits.
 func (h *Handler) TranslateStudy(w http.ResponseWriter, r *http.Request) {
 	if h.nlp == nil {
 		writeError(w, http.StatusServiceUnavailable, "NLP_DISABLED", "NLP translator not configured")
@@ -41,29 +41,67 @@ func (h *Handler) TranslateStudy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// System-wide daily cap using throttler's tracking table
+	// Resolve user and check NLP permissions
+	userID := "anonymous"
+	if cookie, err := r.Cookie("cetus_session"); err == nil && h.validateSession != nil {
+		if id, _, ok := h.validateSession(cookie.Value); ok {
+			userID = id
+		}
+	}
+
+	today := time.Now().Format("2006-01-02")
+
+	// Per-user NLP enabled check
+	if u, ok := h.users.Find(userID); ok {
+		if !u.NLPEnabled {
+			writeError(w, http.StatusForbidden, "NLP_DISABLED_USER", "NLP is not enabled for your account")
+			return
+		}
+		// Per-user daily limit
+		if u.NLPDailyLimit > 0 && h.throttler != nil {
+			var count int
+			h.throttler.DB().QueryRow(
+				"SELECT COALESCE(replays_run,0) FROM usage_tracking WHERE user_id=? AND date=?",
+				userID, today,
+			).Scan(&count)
+			if count >= u.NLPDailyLimit {
+				writeError(w, http.StatusTooManyRequests, "NLP_LIMIT",
+					fmt.Sprintf("Daily NLP limit reached (%d/%d). Try tomorrow.", count, u.NLPDailyLimit))
+				return
+			}
+		}
+	}
+
+	// System-wide cap
 	if h.throttler != nil {
-		today := time.Now().Format("2006-01-02")
-		var count int
+		var sysCount int
 		h.throttler.DB().QueryRow(
 			"SELECT COALESCE(replays_run,0) FROM usage_tracking WHERE user_id='system' AND date=?",
 			today,
-		).Scan(&count)
-		if count >= nlpDailyCap {
-			writeError(w, http.StatusTooManyRequests, "RATE_LIMITED",
-				fmt.Sprintf("Daily NLP cap reached (%d). Try tomorrow.", nlpDailyCap))
+		).Scan(&sysCount)
+		if sysCount >= nlpDailyCap {
+			writeError(w, http.StatusTooManyRequests, "SYSTEM_CAP",
+				fmt.Sprintf("System NLP cap reached (%d). Try tomorrow.", nlpDailyCap))
 			return
 		}
-		h.throttler.DB().Exec(
-			"INSERT INTO usage_tracking (user_id, date, replays_run) VALUES ('system', ?, 1) ON CONFLICT(user_id, date) DO UPDATE SET replays_run = replays_run + 1",
-			today,
-		)
 	}
 
 	result, err := h.nlp.Translate(req.Query)
 	if err != nil {
 		writeJSON(w, http.StatusOK, TranslateStudyResponse{Error: err.Error()})
 		return
+	}
+
+	// Track usage
+	if h.throttler != nil {
+		h.throttler.DB().Exec(
+			"INSERT INTO usage_tracking (user_id, date, replays_run) VALUES (?, ?, 1) ON CONFLICT(user_id, date) DO UPDATE SET replays_run = replays_run + 1",
+			userID, today,
+		)
+		h.throttler.DB().Exec(
+			"INSERT INTO usage_tracking (user_id, date, replays_run) VALUES ('system', ?, 1) ON CONFLICT(user_id, date) DO UPDATE SET replays_run = replays_run + 1",
+			today,
+		)
 	}
 
 	writeJSON(w, http.StatusOK, TranslateStudyResponse{

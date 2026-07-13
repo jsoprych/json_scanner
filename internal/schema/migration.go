@@ -18,10 +18,12 @@ const (
 	Version4 = 4
 	// Version 5: new indicators (PSAR, Aroon, Keltner, CMF, Ultimate Oscillator)
 	Version5 = 5
+	// Version 6: NLP per-user config
+	Version6 = 6
 )
 
 // CurrentVersion is the latest schema version
-const CurrentVersion = Version5
+const CurrentVersion = Version6
 
 // Migrate runs all pending migrations
 func Migrate(db *sql.DB) error {
@@ -65,6 +67,12 @@ func Migrate(db *sql.DB) error {
 		if err := migrateToV5(db); err != nil {
 			return fmt.Errorf("migrate to v5: %w", err)
 		}
+
+	if currentVersion < Version6 {
+		if err := migrateToV6(db); err != nil {
+			return fmt.Errorf("migrate to v6: %w", err)
+		}
+	}
 	}
 	}
 
@@ -411,6 +419,28 @@ func migrateToV5(db *sql.DB) error {
 		}
 	}
 	_, err = tx.Exec("INSERT INTO schema_version (version, applied_at) VALUES (?, strftime('%s', 'now'))", Version5)
+	if err != nil { return fmt.Errorf("record migration: %w", err) }
+	return tx.Commit()
+}
+
+// migrateToV6 adds NLP per-user configuration columns.
+func migrateToV6(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil { return err }
+	defer tx.Rollback()
+
+	for _, col := range []string{
+		"nlp_enabled INTEGER NOT NULL DEFAULT 1",
+		"nlp_daily_limit INTEGER NOT NULL DEFAULT 10",
+	} {
+		_, err = tx.Exec("ALTER TABLE users ADD COLUMN " + col)
+		if err != nil {
+			if !isColumnExistsError(err) {
+				return fmt.Errorf("add column %s: %w", col, err)
+			}
+		}
+	}
+	_, err = tx.Exec("INSERT INTO schema_version (version, applied_at) VALUES (?, strftime('%s', 'now'))", Version6)
 	if err != nil { return fmt.Errorf("record migration: %w", err) }
 	return tx.Commit()
 }

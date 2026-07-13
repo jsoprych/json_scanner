@@ -65,6 +65,8 @@ type User struct {
 	PassHash   string   `json:"pass_hash,omitempty"`   // salted PBKDF2: pbkdf2_sha256$iter$salt$dk
 	PassSHA256 string   `json:"pass_sha256,omitempty"` // legacy unsalted sha256 (read-only compat)
 	Disabled   bool     `json:"disabled,omitempty"`    // disabled users can't sign in
+	NLPEnabled    bool `json:"nlp_enabled"`              // NLP translate feature
+	NLPDailyLimit int  `json:"nlp_daily_limit"`          // Max NLP translations/day
 }
 
 // IsAdmin reports the admin role — an admin sees every study regardless of owner or
@@ -277,7 +279,7 @@ func (s *Store) importJSONLFile(path string) error {
 }
 
 func (s *Store) loadFromSQL() error {
-	rows, err := s.db.Query("SELECT id, name, role_id, pass_hash, disabled FROM users ORDER BY id")
+	rows, err := s.db.Query("SELECT id, name, role_id, pass_hash, disabled, COALESCE(nlp_enabled,1), COALESCE(nlp_daily_limit,10) FROM users ORDER BY id")
 	if err != nil {
 		// pass_hash column might not exist yet — fall through to JSONL
 		return err
@@ -285,17 +287,19 @@ func (s *Store) loadFromSQL() error {
 	defer rows.Close()
 	for rows.Next() {
 		var id, name, roleID, passHash string
-		var disabled int
-		if err := rows.Scan(&id, &name, &roleID, &passHash, &disabled); err != nil {
+		var disabled, nlpE, nlpL int
+		if err := rows.Scan(&id, &name, &roleID, &passHash, &disabled, &nlpE, &nlpL); err != nil {
 			return err
 		}
 		u := User{
-			ID:       id,
-			Name:     name,
-			RoleID:   roleID,
-			Role:     Role(roleID),
-			PassHash: passHash,
-			Disabled: disabled != 0,
+			ID:            id,
+			Name:          name,
+			RoleID:        roleID,
+			Role:          Role(roleID),
+			PassHash:      passHash,
+			Disabled:      disabled != 0,
+			NLPEnabled:    nlpE != 0,
+			NLPDailyLimit: nlpL,
 		}
 		s.all = append(s.all, u)
 		s.byID[u.ID] = u
@@ -318,9 +322,13 @@ func (s *Store) saveToSQL(u User) error {
 	if u.Disabled {
 		disabled = 1
 	}
+	nlpE := 0
+	if u.NLPEnabled {
+		nlpE = 1
+	}
 	_, err := s.db.Exec(
-		"INSERT OR REPLACE INTO users (id, name, role_id, pass_hash, disabled) VALUES (?, ?, ?, ?, ?)",
-		u.ID, u.Name, roleID, u.PassHash, disabled,
+		"INSERT OR REPLACE INTO users (id, name, role_id, pass_hash, disabled, nlp_enabled, nlp_daily_limit) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		u.ID, u.Name, roleID, u.PassHash, disabled, nlpE, u.NLPDailyLimit,
 	)
 	return err
 }
@@ -399,6 +407,16 @@ func (s *Store) SetPassword(id, pw string) error { return s.mutate(id, func(u *U
 // SetGroups replaces a user's group memberships.
 func (s *Store) SetGroups(id string, groups []string) error {
 	return s.mutate(id, func(u *User) { u.Groups = groups })
+}
+
+// SetNLPEnabled enables/disables NLP for a user.
+func (s *Store) SetNLPEnabled(id string, enabled bool) error {
+	return s.mutate(id, func(u *User) { u.NLPEnabled = enabled })
+}
+
+// SetNLPDailyLimit sets the daily NLP translation limit for a user.
+func (s *Store) SetNLPDailyLimit(id string, limit int) error {
+	return s.mutate(id, func(u *User) { u.NLPDailyLimit = limit })
 }
 
 // Delete removes a user.
