@@ -122,13 +122,23 @@
               </template>
             </select>
           </div>
-          <div class="form-group">
-            <label class="flex items-center gap-2">
-              <input type="checkbox" x-model="formData.disabled">
-              <span>Disabled</span>
-            </label>
-          </div>
-          <div class="flex justify-end gap-2">
+           <div class="form-group">
+             <label class="flex items-center gap-2">
+               <input type="checkbox" x-model="formData.disabled">
+               <span>Disabled</span>
+             </label>
+           </div>
+           <div class="form-group">
+             <label class="flex items-center gap-2">
+               <input type="checkbox" x-model="formData.nlp_enabled">
+               <span>🤖 NLP AI Translate</span>
+             </label>
+           </div>
+           <div class="form-group" x-show="formData.nlp_enabled">
+             <label class="form-label">Daily NLP Limit</label>
+             <input type="number" min="0" max="1000" class="form-input" x-model.number="formData.nlp_daily_limit">
+           </div>
+           <div class="flex justify-end gap-2">
             <button type="button" class="btn btn-secondary" @click="closeModal()">
               Cancel
             </button>
@@ -225,7 +235,9 @@ function usersManager() {
       name: '',
       password: '',
       roleId: '',
-      disabled: false
+      disabled: false,
+      nlp_enabled: true,
+      nlp_daily_limit: 10
     },
     
     async init() {
@@ -271,11 +283,13 @@ function usersManager() {
         name: '',
         password: '',
         roleId: this.roles[0]?.id || '',
-        disabled: false
+        disabled: false,
+        nlp_enabled: true,
+        nlp_daily_limit: 10
       };
       this.showModal = true;
     },
-    
+
     showEditModal(user) {
       this.editingUser = user;
       this.formData = {
@@ -283,7 +297,9 @@ function usersManager() {
         name: user.name,
         password: '',
         roleId: user.roleId,
-        disabled: user.disabled
+        disabled: user.disabled,
+        nlp_enabled: user.nlp_enabled !== false,
+        nlp_daily_limit: user.nlp_daily_limit || 10
       };
       this.showModal = true;
     },
