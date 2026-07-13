@@ -62,18 +62,26 @@ func Migrate(db *sql.DB) error {
 		if err := migrateToV4(db); err != nil {
 			return fmt.Errorf("migrate to v4: %w", err)
 		}
+	}
 
 	if currentVersion < Version5 {
 		if err := migrateToV5(db); err != nil {
 			return fmt.Errorf("migrate to v5: %w", err)
 		}
+	} else {
+		if err := migrateToV5(db); err != nil {
+			return fmt.Errorf("repair v5 columns: %w", err)
+		}
+	}
 
 	if currentVersion < Version6 {
 		if err := migrateToV6(db); err != nil {
 			return fmt.Errorf("migrate to v6: %w", err)
 		}
-	}
-	}
+	} else {
+		if err := migrateToV6(db); err != nil {
+			return fmt.Errorf("repair v6 columns: %w", err)
+		}
 	}
 
 	return nil
@@ -418,7 +426,7 @@ func migrateToV5(db *sql.DB) error {
 			}
 		}
 	}
-	_, err = tx.Exec("INSERT INTO schema_version (version, applied_at) VALUES (?, strftime('%s', 'now'))", Version5)
+	_, err = tx.Exec("INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, strftime('%s', 'now'))", Version5)
 	if err != nil { return fmt.Errorf("record migration: %w", err) }
 	return tx.Commit()
 }
@@ -440,7 +448,7 @@ func migrateToV6(db *sql.DB) error {
 			}
 		}
 	}
-	_, err = tx.Exec("INSERT INTO schema_version (version, applied_at) VALUES (?, strftime('%s', 'now'))", Version6)
+	_, err = tx.Exec("INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, strftime('%s', 'now'))", Version6)
 	if err != nil { return fmt.Errorf("record migration: %w", err) }
 	return tx.Commit()
 }
