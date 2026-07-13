@@ -91,3 +91,58 @@ func MAStack(ema10, ema21, ema50, ema200 []float64) []bool {
 	}
 	return out
 }
+
+// PSAR returns Parabolic SAR values.
+// step=0.02, maxAF=0.20 are standard Wilder defaults.
+func PSAR(highs, lows []float64, step, maxAF float64) []float64 {
+	n := len(highs)
+	out := make([]float64, n)
+	for i := range out { out[i] = math.NaN() }
+	if n < 2 { return out }
+
+	af, ep := step, lows[0]
+	isBullish := true
+	sar := lows[0]
+	if highs[1] > highs[0] && lows[1] > lows[0] {
+		ep = highs[0]
+	} else {
+		isBullish = false; sar = highs[0]; ep = lows[0]
+	}
+	out[1] = sar
+
+	for i := 1; i < n-1; i++ {
+		if isBullish {
+			sar = sar + af*(ep-sar)
+			if sar > lows[i] { sar = lows[i] }
+			if sar > lows[i+1] { sar = lows[i+1] }
+			if highs[i] > ep { ep = highs[i]; af = math.Min(af+step, maxAF) }
+			if i+1 < n && lows[i+1] < sar { isBullish = false; af = step; sar = ep; ep = lows[i] }
+		} else {
+			sar = sar - af*(sar-ep)
+			if sar < highs[i] { sar = highs[i] }
+			if sar < highs[i+1] { sar = highs[i+1] }
+			if lows[i] < ep { ep = lows[i]; af = math.Min(af+step, maxAF) }
+			if i+1 < n && highs[i+1] > sar { isBullish = true; af = step; sar = ep; ep = highs[i] }
+		}
+		out[i+1] = math.Max(sar, 0.01)
+	}
+	return out
+}
+
+// Aroon returns Aroon Up, Down, and Oscillator (period typically 25).
+func Aroon(highs, lows []float64, period int) (up, down, osc []float64) {
+	n := len(highs)
+	up = make([]float64, n); down = make([]float64, n); osc = make([]float64, n)
+	for i := range up { up[i] = math.NaN(); down[i] = math.NaN(); osc[i] = math.NaN() }
+	for i := period; i < n; i++ {
+		hi, lo := i, i
+		for j := i - period; j < i; j++ {
+			if highs[j] > highs[hi] { hi = j }
+			if lows[j] < lows[lo] { lo = j }
+		}
+		up[i] = 100 * float64(period-(i-hi)) / float64(period)
+		down[i] = 100 * float64(period-(i-lo)) / float64(period)
+		osc[i] = up[i] - down[i]
+	}
+	return
+}

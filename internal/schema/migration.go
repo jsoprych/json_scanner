@@ -16,10 +16,12 @@ const (
 	Version3 = 3
 	// Version 4: pass_hash column on users
 	Version4 = 4
+	// Version 5: new indicators (PSAR, Aroon, Keltner, CMF, Ultimate Oscillator)
+	Version5 = 5
 )
 
 // CurrentVersion is the latest schema version
-const CurrentVersion = Version4
+const CurrentVersion = Version5
 
 // Migrate runs all pending migrations
 func Migrate(db *sql.DB) error {
@@ -58,6 +60,12 @@ func Migrate(db *sql.DB) error {
 		if err := migrateToV4(db); err != nil {
 			return fmt.Errorf("migrate to v4: %w", err)
 		}
+
+	if currentVersion < Version5 {
+		if err := migrateToV5(db); err != nil {
+			return fmt.Errorf("migrate to v5: %w", err)
+		}
+	}
 	}
 
 	return nil
@@ -382,4 +390,27 @@ func GetVersion(db *sql.DB) (int, error) {
 		return 0, err
 	}
 	return version, nil
+}
+
+// migrateToV5 adds new indicator columns to the snapshot table.
+func migrateToV5(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil { return err }
+	defer tx.Rollback()
+
+	for _, col := range []string{
+		"psar REAL", "aroon_up REAL", "aroon_down REAL", "aroon_osc REAL",
+		"keltner_upper REAL", "keltner_mid REAL", "keltner_lower REAL",
+		"cmf20 REAL", "ultimate_osc REAL",
+	} {
+		_, err = tx.Exec("ALTER TABLE snapshot ADD COLUMN " + col)
+		if err != nil {
+			if !isColumnExistsError(err) {
+				return fmt.Errorf("add column %s: %w", col, err)
+			}
+		}
+	}
+	_, err = tx.Exec("INSERT INTO schema_version (version, applied_at) VALUES (?, strftime('%s', 'now'))", Version5)
+	if err != nil { return fmt.Errorf("record migration: %w", err) }
+	return tx.Commit()
 }

@@ -343,3 +343,53 @@ func ADX(highs, lows, closes []float64, period int) (adx, diPlus, diMinus []floa
 	
 	return adx, diPlus, diMinus
 }
+
+// CMF returns Chaikin Money Flow over period (typically 20 or 21).
+// CMF = sum(Money Flow Volume) / sum(Volume) for the period, where
+// Money Flow Volume = volume * ((close - low) - (high - close)) / (high - low)
+func CMF(highs, lows, closes []float64, volumes []int64, period int) []float64 {
+	n := len(closes)
+	out := make([]float64, n)
+	for i := range out { out[i] = math.NaN() }
+	for i := period; i < n; i++ {
+		var mfSum, volSum float64
+		for j := i - period + 1; j <= i; j++ {
+			mf := 0.0
+			if highs[j] != lows[j] {
+				mf = float64(volumes[j]) * ((closes[j]-float64(lows[j])) - (float64(highs[j])-closes[j])) / (float64(highs[j]) - float64(lows[j]))
+			}
+			mfSum += mf
+			volSum += float64(volumes[j])
+		}
+		if volSum > 0 { out[i] = mfSum / volSum }
+	}
+	return out
+}
+
+// UltimateOsc returns the Ultimate Oscillator (period1=7, period2=14, period3=28 typical).
+func UltimateOsc(highs, lows, closes []float64, p1, p2, p3 int) []float64 {
+	n := len(closes)
+	out := make([]float64, n)
+	for i := range out { out[i] = math.NaN() }
+	if n < p3+2 { return out }
+
+	bp := make([]float64, n) // buying pressure
+	tr := make([]float64, n) // true range
+	for i := 0; i < n; i++ {
+		bp[i] = closes[i] - math.Min(lows[i], closes[i])
+		tr[i] = math.Max(highs[i], closes[i]) - math.Min(lows[i], closes[i])
+	}
+
+	for i := p3; i < n; i++ {
+		var sum1, sum2, sum3, tr1, tr2, tr3 float64
+		for j := i - p1 + 1; j <= i; j++ { sum1 += bp[j]; tr1 += tr[j] }
+		for j := i - p2 + 1; j <= i; j++ { sum2 += bp[j]; tr2 += tr[j] }
+		for j := i - p3 + 1; j <= i; j++ { sum3 += bp[j]; tr3 += tr[j] }
+		avg1 := 4.0; avg2 := 2.0; avg3 := 1.0
+		if tr1 > 0 { avg1 = sum1 / tr1 }
+		if tr2 > 0 { avg2 = sum2 / tr2 }
+		if tr3 > 0 { avg3 = sum3 / tr3 }
+		out[i] = 100 * (4*avg1 + 2*avg2 + avg3) / 7.0
+	}
+	return out
+}

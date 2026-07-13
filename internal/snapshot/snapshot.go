@@ -84,6 +84,9 @@ const createTableSQL = `CREATE TABLE IF NOT EXISTS snapshot(
 	ret_1d REAL, ret_5d REAL, ret_1m REAL, ret_3m REAL, ret_6m REAL, ret_1y REAL,
 	dollar_vol REAL, avg_dollar_vol20 REAL, rel_volume REAL, obv REAL, vwap_dist REAL, mfi14 REAL,
 	golden_cross INTEGER, oversold_bounce INTEGER,
+	psar REAL, aroon_up REAL, aroon_down REAL, aroon_osc REAL,
+	keltner_upper REAL, keltner_mid REAL, keltner_lower REAL,
+	cmf20 REAL, ultimate_osc REAL,
 	PRIMARY KEY (snapshot_date, symbol))`
 
 // ensureTable creates the snapshot table if it doesn't exist.
@@ -119,6 +122,10 @@ var columns = []string{
 	"dollar_vol", "avg_dollar_vol20", "rel_volume", "obv", "vwap_dist", "mfi14",
 	// Cross-detection booleans
 	"golden_cross", "oversold_bounce",
+	// Additional indicators
+	"psar", "aroon_up", "aroon_down", "aroon_osc",
+	"keltner_upper", "keltner_mid", "keltner_lower",
+	"cmf20", "ultimate_osc",
 }
 
 // Load (re)creates the snapshot table and inserts rows. NaN → NULL so SQL
@@ -168,6 +175,9 @@ func (d *DB) Load(rows []screen.SnapshotRow, ts int64) error {
 			nz(r.DollarVol), nz(r.AvgDollarVol20), nz(r.RelVolume), nz(r.OBV), nz(r.VWAPDist), nz(r.MFI14),
 			// Crosses
 			boolToInt(r.IsGoldenCross), boolToInt(r.IsOversoldBounce),
+				nz(r.PSAR), nz(r.AroonUp), nz(r.AroonDown), nz(r.AroonOsc),
+				nz(r.KeltnerUpper), nz(r.KeltnerMid), nz(r.KeltnerLower),
+				nz(r.CMF20), nz(r.UltimateOsc),
 		); err != nil {
 			tx.Rollback()
 			return err
@@ -231,6 +241,9 @@ func (d *DB) LoadHistoryBatch(snapshots []SnapshotBatch) error {
 				nz(r.Ret1d), nz(r.Ret5d), nz(r.Ret1m), nz(r.Ret3m), nz(r.Ret6m), nz(r.Ret1y),
 				nz(r.DollarVol), nz(r.AvgDollarVol20), nz(r.RelVolume), nz(r.OBV), nz(r.VWAPDist), nz(r.MFI14),
 				boolToInt(r.IsGoldenCross), boolToInt(r.IsOversoldBounce),
+				nz(r.PSAR), nz(r.AroonUp), nz(r.AroonDown), nz(r.AroonOsc),
+				nz(r.KeltnerUpper), nz(r.KeltnerMid), nz(r.KeltnerLower),
+				nz(r.CMF20), nz(r.UltimateOsc),
 			); err != nil {
 				return err
 			}
@@ -291,6 +304,9 @@ func (d *DB) LoadHistoryInsert(rows []screen.SnapshotRow, barTs, snapshotDate in
 			nz(r.Ret1d), nz(r.Ret5d), nz(r.Ret1m), nz(r.Ret3m), nz(r.Ret6m), nz(r.Ret1y),
 			nz(r.DollarVol), nz(r.AvgDollarVol20), nz(r.RelVolume), nz(r.OBV), nz(r.VWAPDist), nz(r.MFI14),
 			boolToInt(r.IsGoldenCross), boolToInt(r.IsOversoldBounce),
+				nz(r.PSAR), nz(r.AroonUp), nz(r.AroonDown), nz(r.AroonOsc),
+				nz(r.KeltnerUpper), nz(r.KeltnerMid), nz(r.KeltnerLower),
+				nz(r.CMF20), nz(r.UltimateOsc),
 		); err != nil {
 			tx.Rollback()
 			return err
@@ -351,6 +367,9 @@ func (d *DB) LoadHistory(rows []screen.SnapshotRow, barTs, snapshotDate int64) e
 			nz(r.Ret1d), nz(r.Ret5d), nz(r.Ret1m), nz(r.Ret3m), nz(r.Ret6m), nz(r.Ret1y),
 			nz(r.DollarVol), nz(r.AvgDollarVol20), nz(r.RelVolume), nz(r.OBV), nz(r.VWAPDist), nz(r.MFI14),
 			boolToInt(r.IsGoldenCross), boolToInt(r.IsOversoldBounce),
+				nz(r.PSAR), nz(r.AroonUp), nz(r.AroonDown), nz(r.AroonOsc),
+				nz(r.KeltnerUpper), nz(r.KeltnerMid), nz(r.KeltnerLower),
+				nz(r.CMF20), nz(r.UltimateOsc),
 		); err != nil {
 			tx.Rollback()
 			return err

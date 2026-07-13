@@ -97,6 +97,17 @@ type SnapshotRow struct {
 	// Cross-detection booleans
 	IsGoldenCross    bool `json:"golden_cross"`
 	IsOversoldBounce bool `json:"oversold_bounce"`
+
+	// Additional indicators
+	PSAR          float64 `json:"psar"`
+	AroonUp       float64 `json:"aroon_up"`
+	AroonDown     float64 `json:"aroon_down"`
+	AroonOsc      float64 `json:"aroon_osc"`
+	KeltnerUpper  float64 `json:"keltner_upper"`
+	KeltnerMid    float64 `json:"keltner_mid"`
+	KeltnerLower  float64 `json:"keltner_lower"`
+	CMF20         float64 `json:"cmf20"`
+	UltimateOsc   float64 `json:"ultimate_osc"`
 }
 
 // Build derives the latest SnapshotRow from a symbol's ascending, split-adjusted
@@ -182,6 +193,13 @@ func Build(symbol string, bars []model.Bar) (SnapshotRow, bool) {
 	vwapDist := indicators.VWAPDist(highs, lows, closes, volumes, 20)
 	mfi14 := indicators.MFI(highs, lows, closes, volumes, 14)
 
+	// Additional indicators
+	psar := indicators.PSAR(highs, lows, 0.02, 0.20)
+	aroonUp, aroonDown, aroonOsc := indicators.Aroon(highs, lows, 25)
+	keltUpper, keltMid, keltLower := indicators.KeltnerChannels(closes, highs, lows, 20, 10, 2.0)
+	cmf20 := indicators.CMF(highs, lows, closes, volumes, 20)
+	ultOsc := indicators.UltimateOsc(highs, lows, closes, 7, 14, 28)
+
 	last := bars[n-1]
 	row := SnapshotRow{
 		Symbol: symbol,
@@ -257,6 +275,17 @@ func Build(symbol string, bars []model.Bar) (SnapshotRow, bool) {
 		OBV:            obv[n-1],
 		VWAPDist:       vwapDist[n-1],
 		MFI14:          mfi14[n-1],
+
+		// Additional indicators
+		PSAR:          psar[n-1],
+		AroonUp:       aroonUp[n-1],
+		AroonDown:     aroonDown[n-1],
+		AroonOsc:      aroonOsc[n-1],
+		KeltnerUpper:  keltUpper[n-1],
+		KeltnerMid:    keltMid[n-1],
+		KeltnerLower:  keltLower[n-1],
+		CMF20:         cmf20[n-1],
+		UltimateOsc:   ultOsc[n-1],
 	}
 
 	// Compute crosses directly with shifted indicators (no prev_* fields needed)

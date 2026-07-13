@@ -192,3 +192,23 @@ func HistoricalVol(closes []float64, period int) []float64 {
 	
 	return out
 }
+
+// KeltnerChannels returns upper, middle, and lower Keltner Channel bands.
+// Middle = EMA(period), Upper = middle + mult * ATR(atrPeriod), Lower = middle - mult * ATR(atrPeriod).
+func KeltnerChannels(closes, highs, lows []float64, period, atrPeriod int, mult float64) (upper, mid, lower []float64) {
+	n := len(closes)
+	mid = EMA(closes, period)
+	atr := ATR(highs, lows, closes, atrPeriod)
+	upper = make([]float64, n)
+	lower = make([]float64, n)
+	for i := range closes {
+		if math.IsNaN(mid[i]) || math.IsNaN(atr[i]) {
+			upper[i] = math.NaN()
+			lower[i] = math.NaN()
+		} else {
+			upper[i] = mid[i] + mult*atr[i]
+			lower[i] = mid[i] - mult*atr[i]
+		}
+	}
+	return
+}
