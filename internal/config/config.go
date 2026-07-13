@@ -108,7 +108,12 @@ type Config struct {
 
 	LLMBaseURL string // LLM API base URL (e.g., "https://api.deepseek.com/v1")
 	LLMAPIKey  string // LLM API key
-	LLMModel   string // LLM model name (e.g., "deepseek-chat")
+	LLMModel   string // LLM model name (e.g., "deepseek-v4-flash")
+
+	// --- NLP Limits ---
+
+	NLPFreeDailyLimit   int // Max NLP translations/day for free tier (default 10)
+	NLPSystemDailyLimit int // Max NLP translations/day total system (default 1000)
 
 	// --- the scanner's OWN store (separate from the read-only cetus warehouse) ---
 
@@ -253,7 +258,11 @@ func Load() Config {
 		// NLP
 		LLMBaseURL: envOr("SCANNER_LLM_BASE_URL", "https://api.deepseek.com/v1"),
 		LLMAPIKey:  envOr("SCANNER_LLM_API_KEY", ""),
-		LLMModel:   envOr("SCANNER_LLM_MODEL", "deepseek-chat"),
+		LLMModel:   envOr("SCANNER_LLM_MODEL", "deepseek-v4-flash"),
+
+		// NLP limits
+		NLPFreeDailyLimit:   envInt("SCANNER_NLP_FREE_DAILY_LIMIT", 10),
+		NLPSystemDailyLimit: envInt("SCANNER_NLP_SYSTEM_DAILY_LIMIT", 1000),
 
 		// Own store defaults to persistent path at DATA/SCANNER/scanner.db,
 		// resolved relative to the executable. Set SCANNER_STORE_DB to override,

@@ -16,7 +16,7 @@ import (
 type Config struct {
 	BaseURL string // e.g., "https://api.deepseek.com/v1"
 	APIKey  string
-	Model   string // e.g., "deepseek-chat"
+	Model   string // e.g., "deepseek-v4-flash"
 }
 
 // Translator converts natural language to scanner study SQL.

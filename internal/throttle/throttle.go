@@ -24,6 +24,9 @@ func NewThrottler(db *dblog.DB, roleStore *roles.Store) *Throttler {
 	}
 }
 
+// DB returns the underlying database for tracking queries.
+func (t *Throttler) DB() *dblog.DB { return t.db }
+
 // Init initializes throttling tables
 func (t *Throttler) Init() error {
 	// User-specific limit overrides
