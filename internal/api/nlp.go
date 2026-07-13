@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"cetus-marketdata-scanner/internal/nlp"
 )
 
 // TranslateStudyRequest is the request body for NLP translation.
@@ -113,6 +115,14 @@ func (h *Handler) TranslateStudy(w http.ResponseWriter, r *http.Request) {
 		nlperr(w, "TRANSLATION_FAILED",
 			"The AI could not understand that query. Try rephrasing.",
 			`Try shorter, more specific queries like "stocks above 50 DMA with RSI oversold"`)
+		return
+	}
+
+	// Final gate: validate SQL against real SQLite schema (LIMIT 0 — free)
+	if err := nlp.ValidateSQL(h.snap.RawDB(), result.Where, result.OrderBy); err != nil {
+		nlperr(w, "SQL_INVALID",
+			fmt.Sprintf("The generated SQL is invalid: %s", err.Error()),
+			"The AI produced SQL that doesn't match the database schema. Try rephrasing your query.")
 		return
 	}
 

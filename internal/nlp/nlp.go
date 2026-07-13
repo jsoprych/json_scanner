@@ -4,6 +4,7 @@ package nlp
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -248,4 +249,21 @@ func validateClause(clause string) error {
 		}
 	}
 	return nil
+}
+
+// ValidateSQL tests whether a WHERE clause compiles against the snapshot schema.
+// Uses LIMIT 0 — SQLite parses and plans the query but reads zero rows.
+// Returns nil if the SQL is valid, or the SQLite error if not.
+func ValidateSQL(db *sql.DB, where, orderBy string) error {
+	if db == nil {
+		return nil
+	}
+	// Build a safe test query: SELECT 1 to avoid touching any real data
+	q := "SELECT 1 FROM snapshot WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM snapshot) AND (" + where + ")"
+	if orderBy != "" {
+		q += " ORDER BY " + orderBy
+	}
+	q += " LIMIT 0"
+	_, err := db.Exec("EXPLAIN " + q)
+	return err
 }
