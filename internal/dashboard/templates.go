@@ -249,6 +249,13 @@ const indexSrc = `{{define "index"}}<!doctype html><html lang="en"><head>` + hea
           <div class="field col-2"><label>Order by</label><input class="input" name="order_by" id="s_order" placeholder="dollar_vol DESC"></div>
           <div class="field"><label>Limit</label><input class="input" type="number" name="limit" id="s_limit" placeholder="10"></div>
           <div class="field col-all"><label>WHERE (SQL over the snapshot)</label><textarea class="textarea" name="where" id="s_where" placeholder="close > sma200 AND rsi14 between 55 and 70"></textarea></div>
+          <div class="field col-all" style="padding-top:0"><details><summary style="font-size:11px;cursor:pointer;color:var(--text-3)">🤖 Describe in plain English... (AI)</summary>
+            <div style="display:flex;gap:6px;margin-top:4px">
+              <input class="input" id="nlp_query" placeholder='e.g. "stocks below 200 DMA with RSI oversold, most liquid first"' style="flex:1">
+              <button class="btn" type="button" onclick="nlpTranslate()" style="white-space:nowrap">Translate</button>
+            </div>
+            <div id="nlp_result" style="font-size:11px;color:var(--text-3);margin-top:4px"></div>
+          </details></div>
           <div class="btn-row">
             <button class="btn btn--primary" type="submit">Save</button>
             <button class="btn" type="button" onclick="testStudy()">Test WHERE</button>
@@ -460,6 +467,12 @@ function testStudy(){var b=new URLSearchParams({where:_g('s_where').value,order_
       });
     }
   }).catch(function(e){_g('s_result').textContent='✗ '+e;});}
+function nlpTranslate(){var q=_g('nlp_query').value;if(!q)return;_g('nlp_result').textContent='translating…';
+  fetch('/api/v1/nlp/translate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})}).then(function(r){return r.json();}).then(function(d){
+    if(d.error){_g('nlp_result').textContent='✗ '+d.error;return}
+    _g('s_where').value=d.where;_g('s_order').value=d.order_by||'';_g('s_limit').value=d.limit||'';
+    _g('nlp_result').textContent='✓ '+d.where.substring(0,60)+(d.where.length>60?'…':'');
+  }).catch(function(e){_g('nlp_result').textContent='✗ '+e;});}
 function showResults(matches){
   var pane=document.querySelector('[data-pane="mystudies"]');
   var old=document.getElementById('resultsTable');
