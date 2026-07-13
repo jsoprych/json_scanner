@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"cetus-marketdata-scanner/internal/dblog"
-	"cetus-marketdata-scanner/internal/schema"
 	"cetus-marketdata-scanner/internal/screen"
 	"cetus-marketdata-scanner/internal/study"
 
@@ -42,13 +41,13 @@ func Open(path string, log *slog.Logger) (*DB, error) {
 	rawDB.SetMaxOpenConns(1)
 	rawDB.Exec("PRAGMA foreign_keys = ON")
 
-	if err := schema.Migrate(rawDB); err != nil {
-		rawDB.Close()
-		return nil, fmt.Errorf("snapshot schema migrate: %w", err)
-	}
-
 	db := dblog.New(rawDB, log)
-	return &DB{db: db}, nil
+	d := &DB{db: db}
+	if err := d.ensureTable(); err != nil {
+		rawDB.Close()
+		return nil, fmt.Errorf("snapshot schema: %w", err)
+	}
+	return d, nil
 }
 
 // OpenTest opens a snapshot DB for test use (no external logger).
@@ -96,8 +95,17 @@ const createTableSQL = `CREATE TABLE IF NOT EXISTS snapshot(
 	cmf20 REAL, ultimate_osc REAL,
 	PRIMARY KEY (snapshot_date, symbol))`
 
-// ensureTable creates the snapshot table if it doesn't exist.
+// ensureTable creates the snapshot table if it doesn't exist. If the table
+// exists but has a stale column count, it drops and recreates to match the
+// current schema — no migration system needed.
 func (d *DB) ensureTable() error {
+	var count int
+	if err := d.db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('snapshot')").Scan(&count); err != nil {
+		count = 0
+	}
+	if count > 0 && count != len(columns) {
+		d.db.Exec("DROP TABLE snapshot")
+	}
 	_, err := d.db.Exec(createTableSQL)
 	if err != nil {
 		return fmt.Errorf("create snapshot table: %w", err)

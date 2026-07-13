@@ -16,8 +16,6 @@ const (
 	Version3 = 3
 	// Version 4: pass_hash column on users
 	Version4 = 4
-	// Version 5: new indicators (PSAR, Aroon, Keltner, CMF, Ultimate Oscillator)
-	Version5 = 5
 	// Version 6: NLP per-user config
 	Version6 = 6
 )
@@ -61,16 +59,6 @@ func Migrate(db *sql.DB) error {
 	if currentVersion < Version4 {
 		if err := migrateToV4(db); err != nil {
 			return fmt.Errorf("migrate to v4: %w", err)
-		}
-	}
-
-	if currentVersion < Version5 {
-		if err := migrateToV5(db); err != nil {
-			return fmt.Errorf("migrate to v5: %w", err)
-		}
-	} else {
-		if err := migrateToV5(db); err != nil {
-			return fmt.Errorf("repair v5 columns: %w", err)
 		}
 	}
 
@@ -386,12 +374,6 @@ func contains(s, substr string) bool {
 		findSubstring(s, substr)))
 }
 
-func tableExists(tx *sql.Tx, name string) bool {
-	var count int
-	err := tx.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", name).Scan(&count)
-	return err == nil && count > 0
-}
-
 func findSubstring(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {
@@ -412,37 +394,6 @@ func GetVersion(db *sql.DB) (int, error) {
 		return 0, err
 	}
 	return version, nil
-}
-
-// migrateToV5 adds new indicator columns to the snapshot table.
-func migrateToV5(db *sql.DB) error {
-	tx, err := db.Begin()
-	if err != nil { return err }
-	defer tx.Rollback()
-
-	// If the table doesn't exist yet, ensureTable() in snapshot package will
-	// create it with the full schema — record version and move on.
-	if !tableExists(tx, "snapshot") {
-		_, err = tx.Exec("INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, strftime('%s', 'now'))", Version5)
-		if err != nil { return fmt.Errorf("record migration: %w", err) }
-		return tx.Commit()
-	}
-
-	for _, col := range []string{
-		"psar REAL", "aroon_up REAL", "aroon_down REAL", "aroon_osc REAL",
-		"keltner_upper REAL", "keltner_mid REAL", "keltner_lower REAL",
-		"cmf20 REAL", "ultimate_osc REAL",
-	} {
-		_, err = tx.Exec("ALTER TABLE snapshot ADD COLUMN " + col)
-		if err != nil {
-			if !isColumnExistsError(err) {
-				return fmt.Errorf("add column %s: %w", col, err)
-			}
-		}
-	}
-	_, err = tx.Exec("INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, strftime('%s', 'now'))", Version5)
-	if err != nil { return fmt.Errorf("record migration: %w", err) }
-	return tx.Commit()
 }
 
 // migrateToV6 adds NLP per-user configuration columns.
