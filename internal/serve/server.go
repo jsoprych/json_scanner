@@ -113,6 +113,7 @@ func New(ctx context.Context, log *slog.Logger, cfg config.Config) (*Server, err
 		st.Close()
 		return nil, fmt.Errorf("open snapshot store: %w", err)
 	}
+	snap.LogDB().SetLogLevel(cfg.DBLogLevel)
 
 	// Run schema migrations (creates users, roles, groups, etc.)
 	if err := schema.Migrate(snap.LogDB()); err != nil {

@@ -278,6 +278,7 @@ func scanAndBuild(ctx context.Context, log *slog.Logger, st *store.Store, univer
 	if err != nil {
 		return digest.Digest{}, res, fmt.Errorf("open store %q: %w", cfg.StoreDB, err)
 	}
+	snap.LogDB().SetLogLevel(cfg.DBLogLevel)
 	defer snap.Close()
 	if err := snap.Load(res.Rows, res.Day.Unix()); err != nil {
 		return digest.Digest{}, res, fmt.Errorf("materialize snapshot: %w", err)
@@ -406,6 +407,7 @@ func runStudies(ctx context.Context, log *slog.Logger, cfg config.Config, studyF
 		log.Error("open snapshot store failed", "store", cfg.StoreDB, "error", err)
 		os.Exit(1)
 	}
+	snap.LogDB().SetLogLevel(cfg.DBLogLevel)
 	defer snap.Close()
 
 	// Check if we have a recent snapshot (within last 24 hours)
@@ -657,6 +659,7 @@ func runBackfill(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		log.Error("open snapshot store failed", "store", cfg.StoreDB, "error", err)
 		os.Exit(1)
 	}
+	snap.LogDB().SetLogLevel(cfg.DBLogLevel)
 	defer snap.Close()
 
 	log.Info("backfill starting", "days", cfg.BackfillDays, "retention_days", cfg.SnapshotRetentionDays,
@@ -720,6 +723,7 @@ func runReplay(ctx context.Context, log *slog.Logger, cfg config.Config, dateStr
 		log.Error("open snapshot store failed", "store", cfg.StoreDB, "error", err)
 		os.Exit(1)
 	}
+	snap.LogDB().SetLogLevel(cfg.DBLogLevel)
 	defer snap.Close()
 
 	scanCfg := scanner.Config{

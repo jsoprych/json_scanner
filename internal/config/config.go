@@ -140,6 +140,8 @@ type Config struct {
 	SnapshotRetentionDays int
 	// BackfillDays is how many days to backfill on `scanner backfill` (0 = no backfill).
 	BackfillDays int
+	// DBLogLevel controls dblog verbosity: "all" (default), "slow" (only >5ms), "error" (only failures), "off".
+	DBLogLevel string
 }
 
 // defaultCetusDB is the fallback warehouse path, relative to the executable.
@@ -278,6 +280,7 @@ func Load() Config {
 		// Snapshot history: keep 90 days by default, backfill 0 (opt-in).
 		SnapshotRetentionDays: envInt("SCANNER_SNAPSHOT_RETENTION_DAYS", 90),
 		BackfillDays:          envInt("SCANNER_BACKFILL_DAYS", 0),
+		DBLogLevel:            envOr("SCANNER_DB_LOG_LEVEL", "all"),
 	}
 }
 

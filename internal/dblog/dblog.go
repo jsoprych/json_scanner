@@ -10,14 +10,40 @@ import (
 )
 
 // DB wraps *sql.DB with structured logging.
+// Log level: "all" (default), "slow" (>5ms), "error" (only failures), "off".
 type DB struct {
-	db  *sql.DB
-	log *slog.Logger
+	db    *sql.DB
+	log   *slog.Logger
+	level string
 }
 
 // New creates a loggable DB wrapper.
 func New(db *sql.DB, log *slog.Logger) *DB {
-	return &DB{db: db, log: log.With("component", "db")}
+	return &DB{db: db, log: log.With("component", "db"), level: "all"}
+}
+
+// SetLogLevel tunes verbosity at runtime: "all", "slow", "error", "off".
+func (d *DB) SetLogLevel(level string) { d.level = level }
+
+func (d *DB) logDebug(dur time.Duration, msg, query string, args ...any) {
+	switch d.level {
+	case "off":
+		return
+	case "error":
+		return
+	case "slow":
+		if dur < 5*time.Millisecond {
+			return
+		}
+	}
+	d.log.Debug(msg, "query", query, "args", args, "duration", dur)
+}
+
+func (d *DB) logErr(dur time.Duration, query string, err error, args ...any) {
+	if d.level == "off" {
+		return
+	}
+	d.log.Error("db "+query+" failed", "query", query, "args", args, "duration", dur, "error", err)
 }
 
 // DB returns the underlying *sql.DB for use with existing stores.
@@ -32,9 +58,9 @@ func (d *DB) Exec(query string, args ...any) (sql.Result, error) {
 	res, err := d.db.Exec(query, args...)
 	dur := time.Since(start)
 	if err != nil {
-		d.log.Error("db exec failed", "query", query, "args", args, "duration", dur, "error", err)
+		d.logErr(dur, query, err, args...)
 	} else {
-		d.log.Debug("db exec", "query", query, "duration", dur)
+		d.logDebug(dur, "db exec", query, args...)
 	}
 	return res, err
 }
@@ -45,9 +71,9 @@ func (d *DB) ExecContext(ctx context.Context, query string, args ...any) (sql.Re
 	res, err := d.db.ExecContext(ctx, query, args...)
 	dur := time.Since(start)
 	if err != nil {
-		d.log.Error("db exec failed", "query", query, "args", args, "duration", dur, "error", err)
+		d.logErr(dur, query, err, args...)
 	} else {
-		d.log.Debug("db exec", "query", query, "duration", dur)
+		d.logDebug(dur, "db exec", query, args...)
 	}
 	return res, err
 }
@@ -58,9 +84,9 @@ func (d *DB) Query(query string, args ...any) (*sql.Rows, error) {
 	rows, err := d.db.Query(query, args...)
 	dur := time.Since(start)
 	if err != nil {
-		d.log.Error("db query failed", "query", query, "args", args, "duration", dur, "error", err)
+		d.logErr(dur, query, err, args...)
 	} else {
-		d.log.Debug("db query", "query", query, "duration", dur)
+		d.logDebug(dur, "db query", query, args...)
 	}
 	return rows, err
 }
@@ -71,9 +97,9 @@ func (d *DB) QueryContext(ctx context.Context, query string, args ...any) (*sql.
 	rows, err := d.db.QueryContext(ctx, query, args...)
 	dur := time.Since(start)
 	if err != nil {
-		d.log.Error("db query failed", "query", query, "args", args, "duration", dur, "error", err)
+		d.logErr(dur, query, err, args...)
 	} else {
-		d.log.Debug("db query", "query", query, "duration", dur)
+		d.logDebug(dur, "db query", query, args...)
 	}
 	return rows, err
 }
@@ -82,7 +108,7 @@ func (d *DB) QueryContext(ctx context.Context, query string, args ...any) (*sql.
 func (d *DB) QueryRow(query string, args ...any) *sql.Row {
 	start := time.Now()
 	row := d.db.QueryRow(query, args...)
-	d.log.Debug("db query row", "query", query, "duration", time.Since(start))
+	d.logDebug(time.Since(start), "db query row", query, args...)
 	return row
 }
 
@@ -90,7 +116,7 @@ func (d *DB) QueryRow(query string, args ...any) *sql.Row {
 func (d *DB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
 	start := time.Now()
 	row := d.db.QueryRowContext(ctx, query, args...)
-	d.log.Debug("db query row", "query", query, "duration", time.Since(start))
+	d.logDebug(time.Since(start), "db query row", query, args...)
 	return row
 }
 
@@ -100,9 +126,9 @@ func (d *DB) Begin() (*sql.Tx, error) {
 	tx, err := d.db.Begin()
 	dur := time.Since(start)
 	if err != nil {
-		d.log.Error("db begin failed", "duration", dur, "error", err)
+		d.logErr(dur, "BEGIN", err)
 	} else {
-		d.log.Debug("db begin", "duration", dur)
+		d.logDebug(dur, "db begin", "BEGIN")
 	}
 	return tx, err
 }
@@ -113,9 +139,9 @@ func (d *DB) Prepare(query string) (*sql.Stmt, error) {
 	stmt, err := d.db.Prepare(query)
 	dur := time.Since(start)
 	if err != nil {
-		d.log.Error("db prepare failed", "query", query, "duration", dur, "error", err)
+		d.logErr(dur, query, err)
 	} else {
-		d.log.Debug("db prepare", "query", query, "duration", dur)
+		d.logDebug(dur, "db prepare", query)
 	}
 	return stmt, err
 }
