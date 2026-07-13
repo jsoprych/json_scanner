@@ -386,6 +386,12 @@ func contains(s, substr string) bool {
 		findSubstring(s, substr)))
 }
 
+func tableExists(tx *sql.Tx, name string) bool {
+	var count int
+	err := tx.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", name).Scan(&count)
+	return err == nil && count > 0
+}
+
 func findSubstring(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {
@@ -413,6 +419,14 @@ func migrateToV5(db *sql.DB) error {
 	tx, err := db.Begin()
 	if err != nil { return err }
 	defer tx.Rollback()
+
+	// If the table doesn't exist yet, ensureTable() in snapshot package will
+	// create it with the full schema — record version and move on.
+	if !tableExists(tx, "snapshot") {
+		_, err = tx.Exec("INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, strftime('%s', 'now'))", Version5)
+		if err != nil { return fmt.Errorf("record migration: %w", err) }
+		return tx.Commit()
+	}
 
 	for _, col := range []string{
 		"psar REAL", "aroon_up REAL", "aroon_down REAL", "aroon_osc REAL",

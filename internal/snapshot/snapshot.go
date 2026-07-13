@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"cetus-marketdata-scanner/internal/dblog"
+	"cetus-marketdata-scanner/internal/schema"
 	"cetus-marketdata-scanner/internal/screen"
 	"cetus-marketdata-scanner/internal/study"
 
@@ -40,6 +41,12 @@ func Open(path string, log *slog.Logger) (*DB, error) {
 	}
 	rawDB.SetMaxOpenConns(1)
 	rawDB.Exec("PRAGMA foreign_keys = ON")
+
+	if err := schema.Migrate(rawDB); err != nil {
+		rawDB.Close()
+		return nil, fmt.Errorf("snapshot schema migrate: %w", err)
+	}
+
 	db := dblog.New(rawDB, log)
 	return &DB{db: db}, nil
 }
