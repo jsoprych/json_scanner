@@ -58,6 +58,8 @@ QUICK START:
 
 COMMANDS:
     serve           Start HTTP server with dashboard (default)
+    backfill        Rebuild historical snapshots (uses SCANNER_BACKFILL_DAYS)
+    rebuild-backfill Rebuild binary, drop old snapshot, backfill from scratch
     digest          Generate daily market digest
     studies         Run saved studies
     anomalies       Detect market anomalies
@@ -208,6 +210,7 @@ case "${1:-}" in
     build)     build; exit 0 ;;
     admin)     show_admin_info; exit 0 ;;
     dev)       [ -x "$BIN" ] || build; run_dev ;;
+    rebuild-backfill) build; sqlite3 "${SCANNER_STORE_DB}" "DROP TABLE IF EXISTS snapshot;" 2>/dev/null; exec "$BIN" backfill ;;
     --rebuild) build; shift ;;
 esac
 
