@@ -104,6 +104,12 @@ type Config struct {
 	SQLiteBusyTimeoutMS   int // SQLite busy timeout ms (default 5000)
 	JWTLeewaySecs         int // JWT clock leeway seconds (default 60)
 
+	// --- NLP / LLM ---
+
+	LLMBaseURL string // LLM API base URL (e.g., "https://api.deepseek.com/v1")
+	LLMAPIKey  string // LLM API key
+	LLMModel   string // LLM model name (e.g., "deepseek-chat")
+
 	// --- the scanner's OWN store (separate from the read-only cetus warehouse) ---
 
 	// StoreDB is the scanner's own SQLite DB — it materializes the snapshot here and
@@ -243,6 +249,11 @@ func Load() Config {
 		HTTPHeaderTimeoutSecs: envInt("SCANNER_HTTP_HEADER_TIMEOUT_SECS", 5),
 		SQLiteBusyTimeoutMS:   envInt("SCANNER_SQLITE_BUSY_TIMEOUT_MS", 5000),
 		JWTLeewaySecs:         envInt("SCANNER_JWT_LEEWAY_SECS", 60),
+
+		// NLP
+		LLMBaseURL: envOr("SCANNER_LLM_BASE_URL", "https://api.deepseek.com/v1"),
+		LLMAPIKey:  envOr("SCANNER_LLM_API_KEY", ""),
+		LLMModel:   envOr("SCANNER_LLM_MODEL", "deepseek-chat"),
 
 		// Own store defaults to persistent path at DATA/SCANNER/scanner.db,
 		// resolved relative to the executable. Set SCANNER_STORE_DB to override,

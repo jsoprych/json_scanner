@@ -13,6 +13,7 @@ import (
 	"cetus-marketdata-scanner/internal/auth"
 	"cetus-marketdata-scanner/internal/backtest"
 	"cetus-marketdata-scanner/internal/dashboard"
+	"cetus-marketdata-scanner/internal/nlp"
 	"cetus-marketdata-scanner/internal/predicate"
 	"cetus-marketdata-scanner/internal/study"
 	"cetus-marketdata-scanner/internal/user"
@@ -83,11 +84,21 @@ func (s *Server) registerRoutes(mux *safeMux) {
 
 	detector := alert.NewDetector(s.snap)
 	backtestEngine := backtest.NewEngine(s.snap)
+
+	var nlpTranslator *nlp.Translator
+	if s.cfg.LLMAPIKey != "" {
+		nlpTranslator = nlp.New(nlp.Config{
+			BaseURL: s.cfg.LLMBaseURL,
+			APIKey:  s.cfg.LLMAPIKey,
+			Model:   s.cfg.LLMModel,
+		})
+	}
+
 	apiHandler := api.NewHandlerFull(
 		s.snap, s.studies, s.warehouse, s.users, s.subs,
 		s.groups, s.results, s.roles, s.permCheck, s.throttler,
 		detector, backtestEngine, s.signer, s.jwtVer,
-		s.sessionValidator, s.log,
+		s.sessionValidator, nlpTranslator, s.log,
 	)
 	mux.Handle("/api/v1/", apiHandler.Router())
 

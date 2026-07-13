@@ -12,6 +12,7 @@ import (
 	"cetus-marketdata-scanner/internal/authjwt"
 	"cetus-marketdata-scanner/internal/backtest"
 	"cetus-marketdata-scanner/internal/groups"
+	"cetus-marketdata-scanner/internal/nlp"
 	"cetus-marketdata-scanner/internal/permissions"
 	"cetus-marketdata-scanner/internal/results"
 	"cetus-marketdata-scanner/internal/roles"
@@ -41,6 +42,7 @@ type Handler struct {
 		Verify(string) (string, error)
 	}
 	validateSession func(cookie string) (userID string, isAdmin bool, valid bool)
+	nlp            *nlp.Translator
 	log   *slog.Logger
 	start time.Time
 }
@@ -67,6 +69,7 @@ func NewHandlerFull(
 	signer *authjwt.Signer,
 	verifier interface{ Verify(string) (string, error) },
 	validateSession func(cookie string) (userID string, isAdmin bool, valid bool),
+	nlpTranslator *nlp.Translator,
 	log *slog.Logger,
 ) *Handler {
 	return &Handler{
@@ -85,6 +88,7 @@ func NewHandlerFull(
 		signer:          signer,
 		verifier:        verifier,
 		validateSession: validateSession,
+		nlp:             nlpTranslator,
 		log:             log,
 		start:           time.Now(),
 	}
